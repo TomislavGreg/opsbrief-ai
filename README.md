@@ -167,6 +167,7 @@ started only once the API and core services are stable.
 | AI-003 | Add Docker setup and development commands | Foundation | Ready |
 | AI-004 | Define the operational event schema | Foundation | Ready |
 | AI-005 | Add SQLite event persistence | Foundation | Backlog |
+| AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Blocked |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Backlog |
 | AI-011 | Add batch-event ingestion | Event ingestion | Backlog |
 | AI-012 | Add event filtering and pagination | Event ingestion | Backlog |
@@ -213,8 +214,18 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
+### Blocked tickets
+
+**AI-006.** CI currently warns that `actions/checkout@v4` and
+`actions/setup-python@v5` target Node.js 20, which GitHub has deprecated and
+now forces onto Node.js 24. Builds still pass, but the pinned versions should
+be raised. This is blocked for automated maintenance: anything under
+`.github/workflows/` requires GitHub's `workflows` permission, which the
+maintenance tooling does not hold, so the change has to be applied by hand.
+
 ## Recent Progress
 
+- 2026-07-28 — Recorded the GitHub Actions Node 20 deprecation as AI-006 and documented why workflow changes need manual application.
 - 2026-07-28 — Initialized the project: FastAPI application, health endpoint, settings, test suite, linting and CI.
 
 ## Future Game Center Integration
