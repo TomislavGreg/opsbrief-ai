@@ -1,0 +1,9 @@
+services:
+  api:
+    build: .
+    image: opsbrief-ai:local
+    # Copy .env.example to .env before starting: Compose requires the file.
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

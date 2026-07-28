@@ -36,6 +36,8 @@ produced it.
   version and environment.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
+- Container image and Compose service for running the API without a local
+  Python installation.
 
 Nothing else is implemented yet. The roadmap below is a plan, not a
 description of working software.
@@ -48,6 +50,8 @@ src/opsbrief/
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
 tests/          Pytest suite mirroring the package layout
+Dockerfile      Container image for the API
+compose.yaml    Single-service Compose setup for local runs
 ```
 
 The intended shape as the roadmap lands:
@@ -94,6 +98,29 @@ http://127.0.0.1:8000/docs.
 
 Requires Python 3.12 or newer.
 
+### With Docker
+
+Docker needs no local Python installation. Requires Docker Engine 24 or newer
+with the Compose plugin.
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+The API is on http://127.0.0.1:8000 as above. The image installs the package
+into `python:3.12-slim` and runs uvicorn as an unprivileged user. Compose passes
+`.env` through as `OPSBRIEF_`-prefixed settings. The image declares a health
+check against `/health`, so `docker compose ps` reports the container healthy
+only once the API answers.
+
+```bash
+docker compose up -d --build   # Start in the background
+docker compose ps              # Container and health status
+docker compose logs -f api     # Follow logs
+docker compose down            # Stop and remove
+```
+
 ## API Examples
 
 Check that the service is running:
@@ -122,6 +149,12 @@ ruff check .                         # Lint
 ruff check . --fix                   # Lint and autofix
 ruff format .                        # Format
 uvicorn opsbrief.main:app --reload   # Run the API locally
+```
+
+```bash
+docker compose up --build            # Build and run the API in a container
+docker compose down                  # Stop it
+docker build -t opsbrief-ai .        # Build the image on its own
 ```
 
 ## Roadmap
@@ -164,7 +197,7 @@ started only once the API and core services are stable.
 |----|--------|-------|--------|
 | AI-001 | Initialize FastAPI application and health endpoint | Foundation | Done |
 | AI-002 | Add formatting, linting, tests and GitHub Actions | Foundation | Done |
-| AI-003 | Add Docker setup and development commands | Foundation | Ready |
+| AI-003 | Add Docker setup and development commands | Foundation | Done |
 | AI-004 | Define the operational event schema | Foundation | Ready |
 | AI-005 | Add SQLite event persistence | Foundation | Backlog |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Blocked |
@@ -225,6 +258,7 @@ maintenance tooling does not hold, so the change has to be applied by hand.
 
 ## Recent Progress
 
+- 2026-07-28 — Added the container image, Compose setup and Docker development commands.
 - 2026-07-28 — Recorded the GitHub Actions Node 20 deprecation as AI-006 and documented why workflow changes need manual application.
 - 2026-07-28 — Initialized the project: FastAPI application, health endpoint, settings, test suite, linting and CI.
 

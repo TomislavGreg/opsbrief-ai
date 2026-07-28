@@ -10,6 +10,8 @@ src/opsbrief/          Application package
   config.py            Environment-backed settings
   main.py              Application factory and module-level `app`
 tests/                 Pytest suite mirroring the package layout
+Dockerfile             Container image for the API
+compose.yaml           Single-service Compose setup for local runs
 ```
 
 ## Setup
@@ -30,6 +32,14 @@ pytest tests/test_health.py          # One module
 ruff check .                         # Lint
 ruff check . --fix                   # Lint and autofix
 ruff format .                        # Format
+```
+
+Container:
+
+```bash
+docker compose up --build            # Build and run the API in a container
+docker compose down                  # Stop and remove it
+docker build -t opsbrief-ai .        # Build the image on its own
 ```
 
 CI runs `ruff format --check .`, `ruff check .` and `pytest` on Python 3.12.
