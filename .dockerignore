@@ -1,0 +1,46 @@
+# Version control and CI
+.git/
+.github/
+.gitignore
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test and tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local environment and data: never bake these into an image
+.env
+*.db
+*.sqlite
+*.sqlite3
+
+# Not needed to build or run the image
+tests/
+CLAUDE.md
+LICENSE
+Dockerfile
+.dockerignore
+compose.yaml
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
