@@ -39,6 +39,8 @@ produced it.
   metadata.
 - SQLite persistence for events: a store that writes an event and reads it
   back unchanged, with UTC timestamps and typed metadata preserved.
+- A `POST /events` endpoint that validates one submitted event, assigns it an
+  identifier and stores it.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -53,6 +55,7 @@ description of working software.
 src/opsbrief/
   api/          FastAPI routers, one module per resource
   events/       Operational event schema
+  services/     Logic behind the routers
   storage/      SQLite connection handling and the event store
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
@@ -145,6 +148,62 @@ curl http://127.0.0.1:8000/health
 }
 ```
 
+Submit an operational event:
+
+```bash
+curl -X POST http://127.0.0.1:8000/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source": "rostering",
+    "event_type": "shift.unfilled",
+    "subject": "Steward shift for fixture 4821 is one short",
+    "occurred_at": "2026-07-29T11:30:00+02:00",
+    "severity": "high",
+    "metadata": { "required": 4, "assigned": 3 }
+  }'
+```
+
+The service answers `201 Created` with the stored event. It has gained the
+`id` that later briefs, risks and incidents cite, and a `received_at`
+timestamp, and `occurred_at` has been normalised to UTC:
+
+```json
+{
+  "source": "rostering",
+  "event_type": "shift.unfilled",
+  "subject": "Steward shift for fixture 4821 is one short",
+  "occurred_at": "2026-07-29T09:30:00Z",
+  "severity": "high",
+  "status": null,
+  "entity_type": null,
+  "entity_id": null,
+  "due_at": null,
+  "external_id": null,
+  "metadata": { "required": 4, "assigned": 3 },
+  "id": "9a9f05f9b99e402eb67a1a594eaa2339",
+  "received_at": "2026-07-29T09:31:04.117382Z"
+}
+```
+
+A payload that does not satisfy the event contract is answered with
+`422 Unprocessable Entity`, naming the field at fault, and nothing is stored:
+
+```json
+{
+  "detail": [
+    {
+      "type": "value_error",
+      "loc": ["body", "occurred_at"],
+      "msg": "Value error, timestamp must include a timezone offset"
+    }
+  ]
+}
+```
+
+Submitting the same event twice currently stores it twice; recognising
+resubmissions by `external_id` is AI-013. Batch submission is AI-011, and
+listing stored events is AI-012.
+
 Further endpoints are documented here as they are built.
 
 ## Event Schema
@@ -186,8 +245,8 @@ The contract is generic on purpose: domain specifics belong in `event_type` and
 are refused rather than guessed, and unknown fields are rejected so that a
 mistyped payload fails loudly instead of being silently dropped.
 
-There is no ingestion endpoint yet. Events reach storage only through the
-store described below; AI-010 puts an HTTP endpoint in front of it.
+Events reach storage through `POST /events`, shown above, or directly through
+the store described below.
 
 ## Storage
 
@@ -216,11 +275,12 @@ as JSON, which keeps numbers, booleans and nulls the types they arrived as.
 Storing an event under an identifier already in use raises
 `DuplicateEventIdError` rather than overwriting stored history.
 
-Access is guarded by a lock, because a SQLite connection is not safe to share
-across the threads FastAPI runs synchronous handlers in. Filtering, pagination
-and duplicate protection by `external_id` are separate tickets, so the store
-stays this small for now. There is no object-relational mapper: nothing in the
-roadmap yet needs one.
+The running application opens one store when it starts and closes it when it
+stops, so requests share a single connection. Access is guarded by a lock,
+because a SQLite connection is not safe to share across the threads FastAPI
+runs synchronous handlers in. Filtering, pagination and duplicate protection by
+`external_id` are separate tickets, so the store stays this small for now.
+There is no object-relational mapper: nothing in the roadmap yet needs one.
 
 ## Development Commands
 
@@ -244,7 +304,7 @@ docker build -t opsbrief-ai .        # Build the image on its own
 **Phase 0, Foundation.** Application skeleton, tooling, container setup, event
 schema and SQLite persistence.
 
-**Phase 1, Event ingestion.** Single and batch ingestion, filtering,
+**Phase 1, Event ingestion.** Single and batch ingestion, retrieval, filtering,
 pagination, duplicate protection and sample fixtures.
 
 **Phase 2, Risk detection.** A deterministic, explainable rule interface, plus
@@ -283,11 +343,12 @@ started only once the API and core services are stable.
 | AI-004 | Define the operational event schema | Foundation | Done |
 | AI-005 | Add SQLite event persistence | Foundation | Done |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
-| AI-010 | Add single-event ingestion endpoint | Event ingestion | Ready |
-| AI-011 | Add batch-event ingestion | Event ingestion | Backlog |
+| AI-010 | Add single-event ingestion endpoint | Event ingestion | Done |
+| AI-011 | Add batch-event ingestion | Event ingestion | Ready |
 | AI-012 | Add event filtering and pagination | Event ingestion | Backlog |
 | AI-013 | Add duplicate-event protection | Event ingestion | Backlog |
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
+| AI-015 | Add single-event retrieval endpoint | Event ingestion | Backlog |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Backlog |
 | AI-021 | Detect overdue work | Risk detection | Backlog |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
@@ -340,6 +401,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
 - 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
 - 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
 - 2026-07-29 — Added the operational event schema, its validation rules and tests.
