@@ -246,7 +246,7 @@ started only once the API and core services are stable.
 | AI-003 | Add Docker setup and development commands | Foundation | Done |
 | AI-004 | Define the operational event schema | Foundation | Done |
 | AI-005 | Add SQLite event persistence | Foundation | Ready |
-| AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Blocked |
+| AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Backlog |
 | AI-011 | Add batch-event ingestion | Event ingestion | Backlog |
 | AI-012 | Add event filtering and pagination | Event ingestion | Backlog |
@@ -293,17 +293,18 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-### Blocked tickets
+No tickets are currently blocked.
 
-**AI-006.** CI currently warns that `actions/checkout@v4` and
-`actions/setup-python@v5` target Node.js 20, which GitHub has deprecated and
-now forces onto Node.js 24. Builds still pass, but the pinned versions should
-be raised. This is blocked for automated maintenance: anything under
-`.github/workflows/` requires GitHub's `workflows` permission, which the
-maintenance tooling does not hold, so the change has to be applied by hand.
+### Maintaining the CI workflow
+
+Files under `.github/workflows/` cannot be changed by the project's maintenance
+tooling, which does not hold GitHub's `workflows` permission. Workflow edits are
+applied by a maintainer directly. A ticket that needs one should say so, so that
+it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
 - 2026-07-29 — Added the operational event schema, its validation rules and tests.
 - 2026-07-28 — Added the container image, Compose setup and Docker development commands.
 - 2026-07-28 — Recorded the GitHub Actions Node 20 deprecation as AI-006 and documented why workflow changes need manual application.
