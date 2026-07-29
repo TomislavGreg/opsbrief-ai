@@ -37,6 +37,8 @@ produced it.
 - A validated operational event contract: `EventInput` for submissions and
   `Event` for stored events, with UTC-normalised timestamps and bounded
   metadata.
+- SQLite persistence for events: a store that writes an event and reads it
+  back unchanged, with UTC timestamps and typed metadata preserved.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -51,6 +53,7 @@ description of working software.
 src/opsbrief/
   api/          FastAPI routers, one module per resource
   events/       Operational event schema
+  storage/      SQLite connection handling and the event store
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
 tests/          Pytest suite mirroring the package layout
@@ -183,8 +186,41 @@ The contract is generic on purpose: domain specifics belong in `event_type` and
 are refused rather than guessed, and unknown fields are rejected so that a
 mistyped payload fails loudly instead of being silently dropped.
 
-There is no ingestion endpoint or storage yet. The schema is the contract that
-AI-005 and AI-010 build on.
+There is no ingestion endpoint yet. Events reach storage only through the
+store described below; AI-010 puts an HTTP endpoint in front of it.
+
+## Storage
+
+Events are kept in SQLite, addressed by `OPSBRIEF_DATABASE_URL`. Only
+`sqlite:///` URLs are accepted; anything else is refused at startup rather
+than quietly falling back to a local file. `sqlite:///:memory:` gives a
+throwaway database, which is what the tests use.
+
+```python
+from opsbrief.events import Event, EventInput
+from opsbrief.storage import EventStore
+
+with EventStore.open("sqlite:///./opsbrief.db") as store:
+    event = Event.from_input(EventInput(**submitted_payload))
+    store.add(event)
+
+    stored = store.get(event.id)  # The stored event, or None
+    recent = store.list_events(limit=50)  # Most recently occurred first
+    total = store.count()  # How many events are stored
+```
+
+The table is created on first use and the parent directory is made if it is
+missing, so a fresh checkout runs with no setup step. Timestamps are stored as
+fixed-width UTC text so that they sort in string order, and metadata is stored
+as JSON, which keeps numbers, booleans and nulls the types they arrived as.
+Storing an event under an identifier already in use raises
+`DuplicateEventIdError` rather than overwriting stored history.
+
+Access is guarded by a lock, because a SQLite connection is not safe to share
+across the threads FastAPI runs synchronous handlers in. Filtering, pagination
+and duplicate protection by `external_id` are separate tickets, so the store
+stays this small for now. There is no object-relational mapper: nothing in the
+roadmap yet needs one.
 
 ## Development Commands
 
@@ -245,9 +281,9 @@ started only once the API and core services are stable.
 | AI-002 | Add formatting, linting, tests and GitHub Actions | Foundation | Done |
 | AI-003 | Add Docker setup and development commands | Foundation | Done |
 | AI-004 | Define the operational event schema | Foundation | Done |
-| AI-005 | Add SQLite event persistence | Foundation | Ready |
+| AI-005 | Add SQLite event persistence | Foundation | Done |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
-| AI-010 | Add single-event ingestion endpoint | Event ingestion | Backlog |
+| AI-010 | Add single-event ingestion endpoint | Event ingestion | Ready |
 | AI-011 | Add batch-event ingestion | Event ingestion | Backlog |
 | AI-012 | Add event filtering and pagination | Event ingestion | Backlog |
 | AI-013 | Add duplicate-event protection | Event ingestion | Backlog |
@@ -304,6 +340,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
 - 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
 - 2026-07-29 — Added the operational event schema, its validation rules and tests.
 - 2026-07-28 — Added the container image, Compose setup and Docker development commands.
