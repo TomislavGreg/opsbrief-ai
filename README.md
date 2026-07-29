@@ -34,6 +34,9 @@ produced it.
 
 - FastAPI application with a `/health` endpoint reporting service name,
   version and environment.
+- A validated operational event contract: `EventInput` for submissions and
+  `Event` for stored events, with UTC-normalised timestamps and bounded
+  metadata.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -47,6 +50,7 @@ description of working software.
 ```
 src/opsbrief/
   api/          FastAPI routers, one module per resource
+  events/       Operational event schema
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
 tests/          Pytest suite mirroring the package layout
@@ -140,6 +144,48 @@ curl http://127.0.0.1:8000/health
 
 Further endpoints are documented here as they are built.
 
+## Event Schema
+
+Producing systems submit events. The service assigns each accepted event an
+`id` and a `received_at` timestamp, and every generated brief, risk and
+incident refers back to those IDs.
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `source` | yes | Producing system, for example `rostering`. |
+| `event_type` | yes | Lowercase dotted name, for example `shift.unfilled`. |
+| `subject` | yes | One-line human-readable description. |
+| `occurred_at` | yes | When it happened. Must carry a timezone offset; stored as UTC. |
+| `severity` | no | `info`, `low`, `medium`, `high` or `critical`. Defaults to `info`. |
+| `status` | no | `open`, `in_progress`, `blocked`, `overdue`, `failed`, `resolved` or `cancelled`. |
+| `entity_type`, `entity_id` | no | What the event is about. Supplied together or not at all. |
+| `due_at` | no | Deadline attached to the work, when it has one. |
+| `external_id` | no | The producer's own identifier, for recognising resubmissions. |
+| `metadata` | no | Flat scalar detail, at most 25 entries. |
+
+```json
+{
+  "source": "rostering",
+  "event_type": "shift.unfilled",
+  "subject": "Steward shift for fixture 4821 is one short",
+  "occurred_at": "2026-07-29T09:30:00Z",
+  "severity": "high",
+  "status": "open",
+  "entity_type": "fixture",
+  "entity_id": "4821",
+  "due_at": "2026-07-29T18:00:00Z",
+  "metadata": { "venue": "North Stand", "required": 4, "assigned": 3 }
+}
+```
+
+The contract is generic on purpose: domain specifics belong in `event_type` and
+`metadata` rather than in bespoke fields. Timestamps without a timezone offset
+are refused rather than guessed, and unknown fields are rejected so that a
+mistyped payload fails loudly instead of being silently dropped.
+
+There is no ingestion endpoint or storage yet. The schema is the contract that
+AI-005 and AI-010 build on.
+
 ## Development Commands
 
 ```bash
@@ -198,8 +244,8 @@ started only once the API and core services are stable.
 | AI-001 | Initialize FastAPI application and health endpoint | Foundation | Done |
 | AI-002 | Add formatting, linting, tests and GitHub Actions | Foundation | Done |
 | AI-003 | Add Docker setup and development commands | Foundation | Done |
-| AI-004 | Define the operational event schema | Foundation | Ready |
-| AI-005 | Add SQLite event persistence | Foundation | Backlog |
+| AI-004 | Define the operational event schema | Foundation | Done |
+| AI-005 | Add SQLite event persistence | Foundation | Ready |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Blocked |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Backlog |
 | AI-011 | Add batch-event ingestion | Event ingestion | Backlog |
@@ -258,6 +304,7 @@ maintenance tooling does not hold, so the change has to be applied by hand.
 
 ## Recent Progress
 
+- 2026-07-29 — Added the operational event schema, its validation rules and tests.
 - 2026-07-28 — Added the container image, Compose setup and Docker development commands.
 - 2026-07-28 — Recorded the GitHub Actions Node 20 deprecation as AI-006 and documented why workflow changes need manual application.
 - 2026-07-28 — Initialized the project: FastAPI application, health endpoint, settings, test suite, linting and CI.
