@@ -7,6 +7,7 @@ Conventions and commands for anyone working in this repository.
 ```
 src/opsbrief/          Application package
   api/                 FastAPI routers, one module per resource
+  events/              Operational event schema
   config.py            Environment-backed settings
   main.py              Application factory and module-level `app`
 tests/                 Pytest suite mirroring the package layout
