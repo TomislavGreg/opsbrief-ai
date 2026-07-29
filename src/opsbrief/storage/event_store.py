@@ -1,0 +1,166 @@
+"""Storage of operational events in SQLite."""
+
+import json
+import sqlite3
+from datetime import UTC, datetime
+from threading import Lock
+from types import TracebackType
+
+from opsbrief.events import Event, MetadataValue
+from opsbrief.storage.database import connect, create_schema
+
+#: Fixed-width UTC representation, so stored timestamps sort in string order.
+TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+_COLUMNS = (
+    "id",
+    "source",
+    "event_type",
+    "subject",
+    "occurred_at",
+    "severity",
+    "status",
+    "entity_type",
+    "entity_id",
+    "due_at",
+    "external_id",
+    "metadata",
+    "received_at",
+)
+
+_INSERT = (
+    f"INSERT INTO events ({', '.join(_COLUMNS)}) "
+    f"VALUES ({', '.join(':' + column for column in _COLUMNS)})"
+)
+
+_SELECT = f"SELECT {', '.join(_COLUMNS)} FROM events"
+
+
+class DuplicateEventIdError(Exception):
+    """Raised when an event is stored under an identifier already in use."""
+
+
+def format_timestamp(value: datetime) -> str:
+    """Return ``value`` as the fixed-width UTC text stored in the database."""
+    return value.astimezone(UTC).strftime(TIMESTAMP_FORMAT)
+
+
+def parse_timestamp(value: str) -> datetime:
+    """Return the UTC datetime held in a stored timestamp."""
+    return datetime.strptime(value, TIMESTAMP_FORMAT).replace(tzinfo=UTC)
+
+
+def _to_row(event: Event) -> dict[str, object]:
+    """Return the database row representing ``event``."""
+    return {
+        "id": event.id,
+        "source": event.source,
+        "event_type": event.event_type,
+        "subject": event.subject,
+        "occurred_at": format_timestamp(event.occurred_at),
+        "severity": event.severity.value,
+        "status": None if event.status is None else event.status.value,
+        "entity_type": event.entity_type,
+        "entity_id": event.entity_id,
+        "due_at": None if event.due_at is None else format_timestamp(event.due_at),
+        "external_id": event.external_id,
+        "metadata": json.dumps(event.metadata, sort_keys=True),
+        "received_at": format_timestamp(event.received_at),
+    }
+
+
+def _from_row(row: sqlite3.Row) -> Event:
+    """Return the event a database row represents."""
+    metadata: dict[str, MetadataValue] = json.loads(row["metadata"])
+    due_at = row["due_at"]
+    return Event(
+        id=row["id"],
+        source=row["source"],
+        event_type=row["event_type"],
+        subject=row["subject"],
+        occurred_at=parse_timestamp(row["occurred_at"]),
+        severity=row["severity"],
+        status=row["status"],
+        entity_type=row["entity_type"],
+        entity_id=row["entity_id"],
+        due_at=None if due_at is None else parse_timestamp(due_at),
+        external_id=row["external_id"],
+        metadata=metadata,
+        received_at=parse_timestamp(row["received_at"]),
+    )
+
+
+class EventStore:
+    """Reads and writes stored operational events.
+
+    A store owns its connection. Access is serialised with a lock because
+    FastAPI runs synchronous handlers in a thread pool and a SQLite connection
+    is not safe to share across threads unguarded.
+    """
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+        self._lock = Lock()
+        create_schema(connection)
+
+    @classmethod
+    def open(cls, database_url: str) -> "EventStore":
+        """Open a store against the database named by ``database_url``."""
+        return cls(connect(database_url))
+
+    def add(self, event: Event) -> Event:
+        """Store ``event`` and return it.
+
+        Raises :class:`DuplicateEventIdError` if the identifier is already
+        taken, so that a clash surfaces instead of overwriting stored history.
+        """
+        with self._lock, self._connection:
+            try:
+                self._connection.execute(_INSERT, _to_row(event))
+            except sqlite3.IntegrityError as error:
+                raise DuplicateEventIdError(
+                    f"an event with id {event.id!r} is already stored"
+                ) from error
+        return event
+
+    def get(self, event_id: str) -> Event | None:
+        """Return the stored event with ``event_id``, or ``None`` if there is none."""
+        with self._lock:
+            row = self._connection.execute(f"{_SELECT} WHERE id = :id", {"id": event_id}).fetchone()
+        return None if row is None else _from_row(row)
+
+    def list_events(self, *, limit: int = 100) -> list[Event]:
+        """Return stored events, most recently occurred first.
+
+        Ties on ``occurred_at`` are broken by ``received_at`` so that the order
+        is stable across calls.
+        """
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        with self._lock:
+            rows = self._connection.execute(
+                f"{_SELECT} ORDER BY occurred_at DESC, received_at DESC, id DESC LIMIT :limit",
+                {"limit": limit},
+            ).fetchall()
+        return [_from_row(row) for row in rows]
+
+    def count(self) -> int:
+        """Return how many events are stored."""
+        with self._lock:
+            return int(self._connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+    def close(self) -> None:
+        """Close the underlying connection."""
+        with self._lock:
+            self._connection.close()
+
+    def __enter__(self) -> "EventStore":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
