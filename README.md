@@ -41,6 +41,8 @@ produced it.
   back unchanged, with UTC timestamps and typed metadata preserved.
 - A `POST /events` endpoint that validates one submitted event, assigns it an
   identifier and stores it.
+- A `POST /events/batch` endpoint that validates a bounded batch of events and
+  stores them together, all-or-nothing.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -200,9 +202,50 @@ A payload that does not satisfy the event contract is answered with
 }
 ```
 
+Submit several events in one request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/events/batch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "events": [
+      {
+        "source": "rostering",
+        "event_type": "shift.unfilled",
+        "subject": "Steward shift for fixture 4821 is one short",
+        "occurred_at": "2026-07-29T11:30:00+02:00",
+        "severity": "high"
+      },
+      {
+        "source": "integrations",
+        "event_type": "integration.failed",
+        "subject": "Ticketing webhook failed again",
+        "occurred_at": "2026-07-29T11:45:00+02:00",
+        "severity": "medium"
+      }
+    ]
+  }'
+```
+
+The service answers `201 Created` with a count and the stored events, each with
+its own `id` and `received_at`:
+
+```json
+{
+  "count": 2,
+  "events": [
+    { "id": "9a9f05f9b99e402eb67a1a594eaa2339", "subject": "Steward shift for fixture 4821 is one short", "...": "..." },
+    { "id": "1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f", "subject": "Ticketing webhook failed again", "...": "..." }
+  ]
+}
+```
+
+A batch holds between 1 and 500 events. It is validated and stored as a whole:
+if any event fails the contract the request is answered with `422` and nothing
+is stored, and the insert is atomic, so a batch is never partly applied.
+
 Submitting the same event twice currently stores it twice; recognising
-resubmissions by `external_id` is AI-013. Batch submission is AI-011, and
-listing stored events is AI-012.
+resubmissions by `external_id` is AI-013. Listing stored events is AI-012.
 
 Further endpoints are documented here as they are built.
 
@@ -344,7 +387,7 @@ started only once the API and core services are stable.
 | AI-005 | Add SQLite event persistence | Foundation | Done |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Done |
-| AI-011 | Add batch-event ingestion | Event ingestion | Ready |
+| AI-011 | Add batch-event ingestion | Event ingestion | Done |
 | AI-012 | Add event filtering and pagination | Event ingestion | Backlog |
 | AI-013 | Add duplicate-event protection | Event ingestion | Backlog |
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
@@ -401,6 +444,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
 - 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
 - 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
 - 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
