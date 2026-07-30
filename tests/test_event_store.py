@@ -116,6 +116,41 @@ def test_add_rejects_a_repeated_id(store: EventStore) -> None:
     assert store.count() == 1
 
 
+def test_add_all_stores_every_event(store: EventStore) -> None:
+    events = [make_event(subject=f"Event {index}") for index in range(3)]
+
+    returned = store.add_all(events)
+
+    assert returned == events
+    assert store.count() == 3
+    for event in events:
+        assert store.get(event.id) == event
+
+
+def test_add_all_stores_nothing_for_an_empty_batch(store: EventStore) -> None:
+    assert store.add_all([]) == []
+    assert store.count() == 0
+
+
+def test_add_all_is_all_or_nothing_on_a_repeated_id(store: EventStore) -> None:
+    duplicate = make_event()
+
+    with pytest.raises(DuplicateEventIdError):
+        store.add_all([make_event(), duplicate, duplicate])
+
+    assert store.count() == 0
+
+
+def test_add_all_rejects_ids_already_stored(store: EventStore) -> None:
+    existing = make_event()
+    store.add(existing)
+
+    with pytest.raises(DuplicateEventIdError):
+        store.add_all([make_event(), existing])
+
+    assert store.count() == 1
+
+
 def test_events_are_listed_most_recently_occurred_first(store: EventStore) -> None:
     older = make_event(occurred_at=OCCURRED_AT - timedelta(hours=2))
     newer = make_event(occurred_at=OCCURRED_AT + timedelta(hours=2))

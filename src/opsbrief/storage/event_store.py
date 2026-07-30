@@ -123,6 +123,26 @@ class EventStore:
                 ) from error
         return event
 
+    def add_all(self, events: list[Event]) -> list[Event]:
+        """Store every event in ``events`` atomically and return them.
+
+        Either all of the events are stored or none are: if any identifier is
+        already taken, or clashes with another in the same batch, the whole
+        insert is rolled back and :class:`DuplicateEventIdError` is raised, so a
+        partly-applied batch never reaches storage. An empty list stores
+        nothing and returns an empty list.
+        """
+        if not events:
+            return []
+        with self._lock, self._connection:
+            try:
+                self._connection.executemany(_INSERT, [_to_row(event) for event in events])
+            except sqlite3.IntegrityError as error:
+                raise DuplicateEventIdError(
+                    "the batch contains an event id that is already stored"
+                ) from error
+        return events
+
     def get(self, event_id: str) -> Event | None:
         """Return the stored event with ``event_id``, or ``None`` if there is none."""
         with self._lock:
