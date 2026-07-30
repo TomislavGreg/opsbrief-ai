@@ -128,3 +128,60 @@ def test_endpoint_is_documented(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
     assert "post" in paths["/events"]
+
+
+def test_batch_stores_every_event(client: TestClient, store: EventStore) -> None:
+    payload = {"events": [submission(subject=f"Event {index}") for index in range(3)]}
+
+    response = client.post("/events/batch", json=payload)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["count"] == 3
+    assert [event["subject"] for event in body["events"]] == [
+        "Event 0",
+        "Event 1",
+        "Event 2",
+    ]
+    assert store.count() == 3
+
+
+def test_batch_events_are_given_distinct_identities(client: TestClient) -> None:
+    payload = {"events": [submission(), submission()]}
+
+    body = client.post("/events/batch", json=payload).json()
+
+    identities = [event["id"] for event in body["events"]]
+    assert all(identities)
+    assert len(set(identities)) == 2
+
+
+def test_empty_batch_is_rejected(client: TestClient, store: EventStore) -> None:
+    response = client.post("/events/batch", json={"events": []})
+
+    assert response.status_code == 422
+    assert store.count() == 0
+
+
+def test_batch_with_an_invalid_event_stores_nothing(client: TestClient, store: EventStore) -> None:
+    payload = {"events": [submission(), submission(subject="")]}
+
+    response = client.post("/events/batch", json=payload)
+
+    assert response.status_code == 422
+    assert store.count() == 0
+
+
+def test_batch_rejects_unknown_wrapper_fields(client: TestClient, store: EventStore) -> None:
+    payload = {"events": [submission()], "priority": "urgent"}
+
+    response = client.post("/events/batch", json=payload)
+
+    assert response.status_code == 422
+    assert store.count() == 0
+
+
+def test_batch_endpoint_is_documented(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+
+    assert "post" in paths["/events/batch"]
