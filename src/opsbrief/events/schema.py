@@ -20,6 +20,10 @@ MAX_METADATA_ENTRIES = 25
 MAX_METADATA_KEY_LENGTH = 64
 MAX_METADATA_VALUE_LENGTH = 500
 
+#: Upper bound on a single batch submission, so one request cannot ask the
+#: service to validate and store an unbounded number of events at once.
+MAX_BATCH_SIZE = 500
+
 #: Metadata is flat and scalar so that stored events stay small and bounded,
 #: and so that nothing arbitrary can be nested into a model prompt later.
 MetadataValue = str | int | float | bool | None
@@ -177,3 +181,28 @@ class Event(EventInput):
             id=uuid4().hex,
             received_at=received_at or datetime.now(UTC),
         )
+
+
+class EventBatch(BaseModel):
+    """A batch of operational events submitted in one request.
+
+    The batch is bounded and rejected as a whole if any member is invalid, so a
+    producer learns about a malformed event before any of the batch is stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[EventInput] = Field(
+        min_length=1,
+        max_length=MAX_BATCH_SIZE,
+        description=f"Between 1 and {MAX_BATCH_SIZE} events to store together.",
+    )
+
+
+class EventBatchResult(BaseModel):
+    """The stored form of an accepted batch submission."""
+
+    count: int = Field(description="How many events were stored.")
+    events: list[Event] = Field(
+        description="The stored events, each with its service-assigned identifier.",
+    )
