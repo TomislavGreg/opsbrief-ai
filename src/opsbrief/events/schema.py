@@ -24,6 +24,11 @@ MAX_METADATA_VALUE_LENGTH = 500
 #: service to validate and store an unbounded number of events at once.
 MAX_BATCH_SIZE = 500
 
+#: Default and maximum page sizes for listing stored events, so a listing
+#: request returns a bounded slice rather than the whole store.
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 500
+
 #: Metadata is flat and scalar so that stored events stay small and bounded,
 #: and so that nothing arbitrary can be nested into a model prompt later.
 MetadataValue = str | int | float | bool | None
@@ -205,4 +210,60 @@ class EventBatchResult(BaseModel):
     count: int = Field(description="How many events were stored.")
     events: list[Event] = Field(
         description="The stored events, each with its service-assigned identifier.",
+    )
+
+
+class EventQuery(BaseModel):
+    """Filters and pagination for listing stored events.
+
+    Every filter is optional and matches its column exactly; an omitted filter
+    does not narrow the result. Unknown fields are rejected so a mistyped filter
+    fails loudly instead of being silently ignored and returning the wrong page.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Return only events from this producing system.",
+    )
+    event_type: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Return only events of this exact type.",
+    )
+    severity: EventSeverity | None = Field(
+        default=None,
+        description="Return only events with this producer-stated severity.",
+    )
+    status: EventStatus | None = Field(
+        default=None,
+        description="Return only events in this state.",
+    )
+    limit: int = Field(
+        default=DEFAULT_PAGE_SIZE,
+        ge=1,
+        le=MAX_PAGE_SIZE,
+        description=f"How many events to return, between 1 and {MAX_PAGE_SIZE}.",
+    )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="How many matching events to skip before the page begins.",
+    )
+
+
+class EventPage(BaseModel):
+    """One page of stored events matching a listing query."""
+
+    total: int = Field(
+        description="How many stored events match the filters, across all pages.",
+    )
+    limit: int = Field(description="The page size the listing was taken with.")
+    offset: int = Field(description="How many matching events were skipped.")
+    events: list[Event] = Field(
+        description="The events in this page, most recently occurred first.",
     )

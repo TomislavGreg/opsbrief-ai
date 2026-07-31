@@ -6,10 +6,13 @@ import pytest
 from pydantic import ValidationError
 
 from opsbrief.events import (
+    DEFAULT_PAGE_SIZE,
     MAX_METADATA_ENTRIES,
     MAX_METADATA_VALUE_LENGTH,
+    MAX_PAGE_SIZE,
     Event,
     EventInput,
+    EventQuery,
     EventSeverity,
     EventStatus,
 )
@@ -201,3 +204,43 @@ def test_from_input_defaults_received_at_to_now_in_utc() -> None:
 def test_stored_event_rejects_a_naive_received_at() -> None:
     with pytest.raises(ValidationError, match="timezone offset"):
         Event(**make_payload(), id="abc123", received_at=datetime(2026, 7, 29, 9, 31))
+
+
+def test_event_query_defaults_to_an_unfiltered_first_page() -> None:
+    query = EventQuery()
+
+    assert query.source is None
+    assert query.event_type is None
+    assert query.severity is None
+    assert query.status is None
+    assert query.limit == DEFAULT_PAGE_SIZE
+    assert query.offset == 0
+
+
+def test_event_query_parses_filters_and_pagination() -> None:
+    query = EventQuery(
+        source="integrations", severity="high", status="blocked", limit=10, offset=20
+    )
+
+    assert query.source == "integrations"
+    assert query.severity is EventSeverity.HIGH
+    assert query.status is EventStatus.BLOCKED
+    assert query.limit == 10
+    assert query.offset == 20
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"limit": 0},
+        {"limit": MAX_PAGE_SIZE + 1},
+        {"offset": -1},
+        {"severity": "catastrophic"},
+        {"status": "pending"},
+        {"source": ""},
+        {"unknown": "value"},
+    ],
+)
+def test_event_query_rejects_invalid_input(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        EventQuery(**overrides)
