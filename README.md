@@ -43,6 +43,8 @@ produced it.
   identifier and stores it.
 - A `POST /events/batch` endpoint that validates a bounded batch of events and
   stores them together, all-or-nothing.
+- A `GET /events` endpoint that lists stored events newest first, filtered by
+  source, type, severity or status and paginated with `limit` and `offset`.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -244,8 +246,34 @@ A batch holds between 1 and 500 events. It is validated and stored as a whole:
 if any event fails the contract the request is answered with `422` and nothing
 is stored, and the insert is atomic, so a batch is never partly applied.
 
+List stored events, most recently occurred first:
+
+```bash
+curl 'http://127.0.0.1:8000/events?source=integrations&severity=high&limit=20&offset=0'
+```
+
+The service answers `200 OK` with a page of events and the total number of
+matches, so a caller can tell whether more pages remain:
+
+```json
+{
+  "total": 42,
+  "limit": 20,
+  "offset": 0,
+  "events": [
+    { "id": "1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f", "subject": "Ticketing webhook failed again", "...": "..." }
+  ]
+}
+```
+
+Every filter (`source`, `event_type`, `severity`, `status`) is optional and
+matches its field exactly. `limit` defaults to 50 and holds between 1 and 500;
+`offset` skips that many matches before the page begins. An unknown or
+malformed query parameter is rejected with `422` rather than silently ignored.
+
 Submitting the same event twice currently stores it twice; recognising
-resubmissions by `external_id` is AI-013. Listing stored events is AI-012.
+resubmissions by `external_id` is AI-013. Retrieving a single event by `id` is
+AI-015.
 
 Further endpoints are documented here as they are built.
 
@@ -299,7 +327,7 @@ than quietly falling back to a local file. `sqlite:///:memory:` gives a
 throwaway database, which is what the tests use.
 
 ```python
-from opsbrief.events import Event, EventInput
+from opsbrief.events import Event, EventInput, EventSeverity
 from opsbrief.storage import EventStore
 
 with EventStore.open("sqlite:///./opsbrief.db") as store:
@@ -308,7 +336,8 @@ with EventStore.open("sqlite:///./opsbrief.db") as store:
 
     stored = store.get(event.id)  # The stored event, or None
     recent = store.list_events(limit=50)  # Most recently occurred first
-    total = store.count()  # How many events are stored
+    failures = store.list_events(source="integrations", severity=EventSeverity.HIGH)
+    total = store.count(source="integrations")  # Matches, ignoring pagination
 ```
 
 The table is created on first use and the parent directory is made if it is
@@ -321,9 +350,11 @@ Storing an event under an identifier already in use raises
 The running application opens one store when it starts and closes it when it
 stops, so requests share a single connection. Access is guarded by a lock,
 because a SQLite connection is not safe to share across the threads FastAPI
-runs synchronous handlers in. Filtering, pagination and duplicate protection by
-`external_id` are separate tickets, so the store stays this small for now.
-There is no object-relational mapper: nothing in the roadmap yet needs one.
+runs synchronous handlers in. `list_events` and `count` take the same optional
+column filters, so a filtered listing and its total stay in step. Duplicate
+protection by `external_id` is a separate ticket, so the store stays this small
+for now. There is no object-relational mapper: nothing in the roadmap yet needs
+one.
 
 ## Development Commands
 
@@ -388,7 +419,7 @@ started only once the API and core services are stable.
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Done |
 | AI-011 | Add batch-event ingestion | Event ingestion | Done |
-| AI-012 | Add event filtering and pagination | Event ingestion | Backlog |
+| AI-012 | Add event filtering and pagination | Event ingestion | Done |
 | AI-013 | Add duplicate-event protection | Event ingestion | Backlog |
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Backlog |
@@ -444,6 +475,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
 - 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
 - 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
 - 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
