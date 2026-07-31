@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from types import TracebackType
 
-from opsbrief.events import Event, MetadataValue
+from opsbrief.events import Event, EventSeverity, EventStatus, MetadataValue
 from opsbrief.storage.database import connect, create_schema
 
 #: Fixed-width UTC representation, so stored timestamps sort in string order.
@@ -67,6 +67,35 @@ def _to_row(event: Event) -> dict[str, object]:
         "metadata": json.dumps(event.metadata, sort_keys=True),
         "received_at": format_timestamp(event.received_at),
     }
+
+
+def _filters(
+    source: str | None,
+    event_type: str | None,
+    severity: EventSeverity | None,
+    status: EventStatus | None,
+) -> dict[str, object]:
+    """Return the column filters as stored values, enums resolved to their text."""
+    return {
+        "source": source,
+        "event_type": event_type,
+        "severity": None if severity is None else severity.value,
+        "status": None if status is None else status.value,
+    }
+
+
+def _filter_clause(filters: dict[str, object]) -> tuple[str, dict[str, object]]:
+    """Return a WHERE clause and its parameters for the given column filters.
+
+    Only entries whose value is not ``None`` become equality conditions, so an
+    omitted filter widens the result rather than narrowing it to nothing. The
+    column names are fixed by the caller, never taken from request data.
+    """
+    active = {column: value for column, value in filters.items() if value is not None}
+    if not active:
+        return "", {}
+    clause = " WHERE " + " AND ".join(f"{column} = :{column}" for column in active)
+    return clause, active
 
 
 def _from_row(row: sqlite3.Row) -> Event:
@@ -149,25 +178,63 @@ class EventStore:
             row = self._connection.execute(f"{_SELECT} WHERE id = :id", {"id": event_id}).fetchone()
         return None if row is None else _from_row(row)
 
-    def list_events(self, *, limit: int = 100) -> list[Event]:
+    def list_events(
+        self,
+        *,
+        source: str | None = None,
+        event_type: str | None = None,
+        severity: EventSeverity | None = None,
+        status: EventStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Event]:
         """Return stored events, most recently occurred first.
 
-        Ties on ``occurred_at`` are broken by ``received_at`` so that the order
-        is stable across calls.
+        Each supplied filter narrows the result to events whose column matches
+        it exactly; omitted filters do not narrow it. ``limit`` and ``offset``
+        page through the matches, so successive pages of the same filters walk
+        the whole result without gaps or repeats.
+
+        Ties on ``occurred_at`` are broken by ``received_at`` and then ``id`` so
+        that the order is stable across calls, which is what makes paging safe.
         """
         if limit < 1:
             raise ValueError("limit must be at least 1")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+        clause, params = _filter_clause(_filters(source, event_type, severity, status))
+        params["limit"] = limit
+        params["offset"] = offset
         with self._lock:
             rows = self._connection.execute(
-                f"{_SELECT} ORDER BY occurred_at DESC, received_at DESC, id DESC LIMIT :limit",
-                {"limit": limit},
+                f"{_SELECT}{clause} "
+                "ORDER BY occurred_at DESC, received_at DESC, id DESC "
+                "LIMIT :limit OFFSET :offset",
+                params,
             ).fetchall()
         return [_from_row(row) for row in rows]
 
-    def count(self) -> int:
-        """Return how many events are stored."""
+    def count(
+        self,
+        *,
+        source: str | None = None,
+        event_type: str | None = None,
+        severity: EventSeverity | None = None,
+        status: EventStatus | None = None,
+    ) -> int:
+        """Return how many stored events match the given filters.
+
+        With no filters this is the total number of stored events; otherwise it
+        counts every match, independent of any pagination, so a caller can tell
+        how many pages a filtered listing spans.
+        """
+        clause, params = _filter_clause(_filters(source, event_type, severity, status))
         with self._lock:
-            return int(self._connection.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+            return int(
+                self._connection.execute(f"SELECT COUNT(*) FROM events{clause}", params).fetchone()[
+                    0
+                ]
+            )
 
     def close(self) -> None:
         """Close the underlying connection."""

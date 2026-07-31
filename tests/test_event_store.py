@@ -188,9 +188,82 @@ def test_listing_ties_are_ordered_consistently(store: EventStore) -> None:
     assert first == second
 
 
+def test_listing_pages_through_events_with_an_offset(store: EventStore) -> None:
+    for hour in range(5):
+        store.add(make_event(occurred_at=OCCURRED_AT + timedelta(hours=hour)))
+
+    first_page = store.list_events(limit=2, offset=0)
+    second_page = store.list_events(limit=2, offset=2)
+    third_page = store.list_events(limit=2, offset=4)
+
+    occurred = [
+        event.occurred_at for page in (first_page, second_page, third_page) for event in page
+    ]
+    assert occurred == [OCCURRED_AT + timedelta(hours=hour) for hour in (4, 3, 2, 1, 0)]
+    assert len(third_page) == 1
+
+
+def test_offset_past_the_end_returns_nothing(store: EventStore) -> None:
+    store.add(make_event())
+
+    assert store.list_events(offset=5) == []
+
+
+def test_listing_filters_by_source(store: EventStore) -> None:
+    store.add(make_event(source="rostering"))
+    store.add(make_event(source="integrations"))
+
+    listed = store.list_events(source="integrations")
+
+    assert [event.source for event in listed] == ["integrations"]
+
+
+def test_listing_filters_by_severity_and_status(store: EventStore) -> None:
+    store.add(make_event(severity="high", status="blocked"))
+    store.add(make_event(severity="high", status="open"))
+    store.add(make_event(severity="low", status="blocked"))
+
+    listed = store.list_events(severity=EventSeverity.HIGH, status=EventStatus.BLOCKED)
+
+    assert len(listed) == 1
+    assert listed[0].severity is EventSeverity.HIGH
+    assert listed[0].status is EventStatus.BLOCKED
+
+
+def test_listing_filters_combine_and_page_together(store: EventStore) -> None:
+    for hour in range(4):
+        store.add(
+            make_event(source="integrations", occurred_at=OCCURRED_AT + timedelta(hours=hour))
+        )
+    store.add(make_event(source="rostering"))
+
+    page = store.list_events(source="integrations", limit=2, offset=1)
+
+    assert [event.occurred_at for event in page] == [
+        OCCURRED_AT + timedelta(hours=2),
+        OCCURRED_AT + timedelta(hours=1),
+    ]
+
+
+def test_count_respects_filters(store: EventStore) -> None:
+    store.add(make_event(source="integrations", severity="high"))
+    store.add(make_event(source="integrations", severity="low"))
+    store.add(make_event(source="rostering", severity="high"))
+
+    assert store.count() == 3
+    assert store.count(source="integrations") == 2
+    assert store.count(severity=EventSeverity.HIGH) == 2
+    assert store.count(source="integrations", severity=EventSeverity.HIGH) == 1
+
+
 def test_listing_rejects_a_limit_below_one(store: EventStore) -> None:
     with pytest.raises(ValueError, match="at least 1"):
         store.list_events(limit=0)
+
+
+def test_listing_rejects_a_negative_offset(store: EventStore) -> None:
+    with pytest.raises(ValueError, match="negative"):
+        store.list_events(offset=-1)
 
 
 def test_an_empty_store_lists_nothing(store: EventStore) -> None:
