@@ -1,12 +1,36 @@
-"""Event ingestion endpoint."""
+"""Event ingestion and retrieval endpoints."""
 
-from fastapi import APIRouter, status
+from typing import Annotated
+
+from fastapi import APIRouter, Query, status
 
 from opsbrief.api.dependencies import EventStoreDependency
-from opsbrief.events import Event, EventBatch, EventBatchResult, EventInput
-from opsbrief.services import record_event, record_events
+from opsbrief.events import (
+    Event,
+    EventBatch,
+    EventBatchResult,
+    EventInput,
+    EventPage,
+    EventQuery,
+)
+from opsbrief.services import list_events, record_event, record_events
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+
+@router.get(
+    "",
+    response_model=EventPage,
+    summary="List stored operational events",
+    response_description="A page of stored events, newest first, with the total match count.",
+)
+def read_events(query: Annotated[EventQuery, Query()], store: EventStoreDependency) -> EventPage:
+    """Return a filtered, paginated page of stored events, most recent first.
+
+    The filters and pagination are validated as query parameters; an unknown or
+    malformed parameter is rejected with 422 rather than silently ignored.
+    """
+    return list_events(store, query)
 
 
 @router.post(

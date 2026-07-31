@@ -185,3 +185,78 @@ def test_batch_endpoint_is_documented(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
     assert "post" in paths["/events/batch"]
+
+
+def test_listing_an_empty_store_returns_an_empty_page(client: TestClient) -> None:
+    body = client.get("/events").json()
+
+    assert body == {"total": 0, "limit": 50, "offset": 0, "events": []}
+
+
+def test_listing_returns_stored_events_newest_first(client: TestClient) -> None:
+    client.post("/events", json=submission(subject="Older", occurred_at="2026-07-29T08:00:00Z"))
+    client.post("/events", json=submission(subject="Newer", occurred_at="2026-07-29T10:00:00Z"))
+
+    body = client.get("/events").json()
+
+    assert body["total"] == 2
+    assert [event["subject"] for event in body["events"]] == ["Newer", "Older"]
+
+
+def test_listing_filters_by_source_and_severity(client: TestClient) -> None:
+    client.post("/events", json=submission(source="integrations", severity="high"))
+    client.post("/events", json=submission(source="integrations", severity="low"))
+    client.post("/events", json=submission(source="rostering", severity="high"))
+
+    body = client.get("/events", params={"source": "integrations", "severity": "high"}).json()
+
+    assert body["total"] == 1
+    assert body["events"][0]["source"] == "integrations"
+    assert body["events"][0]["severity"] == "high"
+
+
+def test_listing_reports_the_total_beyond_the_page(client: TestClient) -> None:
+    for hour in range(5):
+        client.post("/events", json=submission(occurred_at=f"2026-07-29T0{hour}:00:00Z"))
+
+    body = client.get("/events", params={"limit": 2, "offset": 0}).json()
+
+    assert body["total"] == 5
+    assert body["limit"] == 2
+    assert len(body["events"]) == 2
+
+
+def test_listing_pages_do_not_overlap(client: TestClient) -> None:
+    for hour in range(4):
+        client.post("/events", json=submission(occurred_at=f"2026-07-29T0{hour}:00:00Z"))
+
+    first = client.get("/events", params={"limit": 2, "offset": 0}).json()["events"]
+    second = client.get("/events", params={"limit": 2, "offset": 2}).json()["events"]
+
+    ids = [event["id"] for event in first + second]
+    assert len(set(ids)) == 4
+
+
+@pytest.mark.parametrize(
+    ("description", "params"),
+    [
+        ("limit below one", {"limit": 0}),
+        ("limit above the maximum", {"limit": 10_000}),
+        ("negative offset", {"offset": -1}),
+        ("unknown severity", {"severity": "catastrophic"}),
+        ("unknown status", {"status": "pending"}),
+        ("unknown query parameter", {"unexpected": "value"}),
+    ],
+)
+def test_listing_rejects_invalid_query_parameters(
+    client: TestClient, description: str, params: dict[str, Any]
+) -> None:
+    response = client.get("/events", params=params)
+
+    assert response.status_code == 422, description
+
+
+def test_listing_endpoint_is_documented(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+
+    assert "get" in paths["/events"]
