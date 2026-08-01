@@ -45,6 +45,8 @@ produced it.
   stores them together, all-or-nothing.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
   source, type, severity or status and paginated with `limit` and `offset`.
+- A `GET /events/{event_id}` endpoint that returns a single stored event, or
+  404 when no event carries that identifier.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -271,9 +273,24 @@ matches its field exactly. `limit` defaults to 50 and holds between 1 and 500;
 `offset` skips that many matches before the page begins. An unknown or
 malformed query parameter is rejected with `422` rather than silently ignored.
 
+Retrieve a single stored event by its identifier:
+
+```bash
+curl http://127.0.0.1:8000/events/9a9f05f9b99e402eb67a1a594eaa2339
+```
+
+The service answers `200 OK` with the stored event, exactly as a listing would
+report it. An identifier that matches no stored event is answered with `404`,
+naming the identifier, so a caller can tell a missing event from an empty one:
+
+```json
+{
+  "detail": "no event is stored under id '9a9f05f9b99e402eb67a1a594eaa2339'"
+}
+```
+
 Submitting the same event twice currently stores it twice; recognising
-resubmissions by `external_id` is AI-013. Retrieving a single event by `id` is
-AI-015.
+resubmissions by `external_id` is AI-013.
 
 Further endpoints are documented here as they are built.
 
@@ -422,7 +439,7 @@ started only once the API and core services are stable.
 | AI-012 | Add event filtering and pagination | Event ingestion | Done |
 | AI-013 | Add duplicate-event protection | Event ingestion | Backlog |
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
-| AI-015 | Add single-event retrieval endpoint | Event ingestion | Backlog |
+| AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Backlog |
 | AI-021 | Detect overdue work | Risk detection | Backlog |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
@@ -475,6 +492,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
 - 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
 - 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
 - 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
