@@ -130,6 +130,49 @@ def test_endpoint_is_documented(client: TestClient) -> None:
     assert "post" in paths["/events"]
 
 
+def test_stored_event_is_retrieved_by_id(client: TestClient) -> None:
+    created = client.post("/events", json=submission(subject="Retrieve me")).json()
+
+    response = client.get(f"/events/{created['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == created["id"]
+    assert body["subject"] == "Retrieve me"
+
+
+def test_retrieved_event_matches_the_stored_one(client: TestClient) -> None:
+    created = client.post(
+        "/events",
+        json=submission(
+            severity="high",
+            status="open",
+            entity_type="fixture",
+            entity_id="4821",
+            due_at="2026-07-29T18:00:00Z",
+            external_id="roster-9931",
+            metadata={"required": 4, "assigned": 3},
+        ),
+    ).json()
+
+    retrieved = client.get(f"/events/{created['id']}").json()
+
+    assert retrieved == created
+
+
+def test_unknown_event_id_is_not_found(client: TestClient) -> None:
+    response = client.get("/events/does-not-exist")
+
+    assert response.status_code == 404
+    assert "does-not-exist" in response.json()["detail"]
+
+
+def test_retrieval_endpoint_is_documented(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+
+    assert "get" in paths["/events/{event_id}"]
+
+
 def test_batch_stores_every_event(client: TestClient, store: EventStore) -> None:
     payload = {"events": [submission(subject=f"Event {index}") for index in range(3)]}
 

@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from opsbrief.api.dependencies import EventStoreDependency
 from opsbrief.events import (
@@ -13,7 +13,7 @@ from opsbrief.events import (
     EventPage,
     EventQuery,
 )
-from opsbrief.services import list_events, record_event, record_events
+from opsbrief.services import get_event, list_events, record_event, record_events
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -31,6 +31,31 @@ def read_events(query: Annotated[EventQuery, Query()], store: EventStoreDependen
     malformed parameter is rejected with 422 rather than silently ignored.
     """
     return list_events(store, query)
+
+
+@router.get(
+    "/{event_id}",
+    response_model=Event,
+    summary="Retrieve a stored operational event",
+    response_description="The stored event with the requested identifier.",
+    responses={404: {"description": "No event is stored under the requested identifier."}},
+)
+def read_event(
+    event_id: Annotated[str, Path(description="The service-assigned identifier of the event.")],
+    store: EventStoreDependency,
+) -> Event:
+    """Return the single stored event with ``event_id``.
+
+    An identifier that matches no stored event is answered with 404 rather than
+    an empty body, so a caller can tell a missing event from an empty one.
+    """
+    event = get_event(store, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no event is stored under id {event_id!r}",
+        )
+    return event
 
 
 @router.post(
