@@ -144,13 +144,48 @@ class EventStore:
         taken, so that a clash surfaces instead of overwriting stored history.
         """
         with self._lock, self._connection:
-            try:
-                self._connection.execute(_INSERT, _to_row(event))
-            except sqlite3.IntegrityError as error:
-                raise DuplicateEventIdError(
-                    f"an event with id {event.id!r} is already stored"
-                ) from error
+            self._insert(event)
         return event
+
+    def add_or_get(self, event: Event) -> Event:
+        """Store ``event``, or return the event already stored under its key.
+
+        An event carrying an ``external_id`` is deduplicated per ``source``: if
+        the producer has already submitted an event under the same
+        ``(source, external_id)``, that stored event is returned unchanged and
+        ``event`` is not stored, so a producer that resubmits after a retry or a
+        redelivery does not create a duplicate. An event with no ``external_id``
+        carries no resubmission key and is always stored.
+
+        The lookup and the insert happen together under the store lock, so two
+        concurrent resubmissions of the same key cannot both be stored. The
+        returned event is ``event`` itself when it was stored, and the
+        previously stored event when the submission was recognised as a
+        resubmission; callers can tell the two apart by comparing ``id``.
+        """
+        with self._lock, self._connection:
+            if event.external_id:
+                row = self._connection.execute(
+                    f"{_SELECT} WHERE source = :source AND external_id = :external_id "
+                    "ORDER BY received_at, id LIMIT 1",
+                    {"source": event.source, "external_id": event.external_id},
+                ).fetchone()
+                if row is not None:
+                    return _from_row(row)
+            self._insert(event)
+        return event
+
+    def _insert(self, event: Event) -> None:
+        """Insert one event, translating an id clash into ``DuplicateEventIdError``.
+
+        The caller holds the lock and the connection's transaction.
+        """
+        try:
+            self._connection.execute(_INSERT, _to_row(event))
+        except sqlite3.IntegrityError as error:
+            raise DuplicateEventIdError(
+                f"an event with id {event.id!r} is already stored"
+            ) from error
 
     def add_all(self, events: list[Event]) -> list[Event]:
         """Store every event in ``events`` atomically and return them.

@@ -101,6 +101,53 @@ def test_each_submission_is_stored_separately(client: TestClient, store: EventSt
     assert store.count() == 2
 
 
+def test_resubmission_with_a_known_external_id_is_not_stored_again(
+    client: TestClient, store: EventStore
+) -> None:
+    first = client.post("/events", json=submission(external_id="roster-9912"))
+    second = client.post("/events", json=submission(external_id="roster-9912"))
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert store.count() == 1
+
+
+def test_resubmission_returns_the_originally_stored_event(client: TestClient) -> None:
+    first = client.post(
+        "/events", json=submission(external_id="roster-9912", subject="First wording")
+    ).json()
+    second = client.post(
+        "/events", json=submission(external_id="roster-9912", subject="Reworded on retry")
+    ).json()
+
+    assert second["id"] == first["id"]
+    assert second["subject"] == "First wording"
+
+
+def test_same_external_id_from_a_different_source_is_stored(
+    client: TestClient, store: EventStore
+) -> None:
+    client.post("/events", json=submission(source="rostering", external_id="shared-1"))
+    response = client.post(
+        "/events", json=submission(source="integrations", external_id="shared-1")
+    )
+
+    assert response.status_code == 201
+    assert store.count() == 2
+
+
+def test_submissions_without_an_external_id_are_never_deduplicated(
+    client: TestClient, store: EventStore
+) -> None:
+    first = client.post("/events", json=submission())
+    second = client.post("/events", json=submission())
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert store.count() == 2
+
+
 @pytest.mark.parametrize(
     ("description", "payload"),
     [
