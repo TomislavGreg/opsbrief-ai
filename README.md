@@ -40,7 +40,8 @@ produced it.
 - SQLite persistence for events: a store that writes an event and reads it
   back unchanged, with UTC timestamps and typed metadata preserved.
 - A `POST /events` endpoint that validates one submitted event, assigns it an
-  identifier and stores it.
+  identifier and stores it, recognising a resubmission carrying an
+  `external_id` the same source has already sent rather than storing it twice.
 - A `POST /events/batch` endpoint that validates a bounded batch of events and
   stores them together, all-or-nothing.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
@@ -289,8 +290,17 @@ naming the identifier, so a caller can tell a missing event from an empty one:
 }
 ```
 
-Submitting the same event twice currently stores it twice; recognising
-resubmissions by `external_id` is AI-013.
+A producer that includes an `external_id` can safely resend an event: the
+first submission is stored and answered with `201 Created`, and a later
+submission carrying the same `external_id` from the same `source` is recognised
+as a resubmission. It is answered with `200 OK` and the originally stored event,
+and nothing is stored again, so a delivery retried after a dropped connection
+does not create a duplicate. The first submission wins: a resubmission that
+reworded the same `external_id` still returns the event as first stored. An
+event with no `external_id` carries no such key and is always stored. The key is
+scoped to the `source`, so two producers may use the same `external_id` without
+colliding. Recognising resubmissions inside a `POST /events/batch` request is
+AI-016.
 
 Further endpoints are documented here as they are built.
 
@@ -351,6 +361,9 @@ with EventStore.open("sqlite:///./opsbrief.db") as store:
     event = Event.from_input(EventInput(**submitted_payload))
     store.add(event)
 
+    resend = Event.from_input(EventInput(**submitted_payload))
+    kept = store.add_or_get(resend)  # The event stored under the resubmission key
+
     stored = store.get(event.id)  # The stored event, or None
     recent = store.list_events(limit=50)  # Most recently occurred first
     failures = store.list_events(source="integrations", severity=EventSeverity.HIGH)
@@ -368,10 +381,11 @@ The running application opens one store when it starts and closes it when it
 stops, so requests share a single connection. Access is guarded by a lock,
 because a SQLite connection is not safe to share across the threads FastAPI
 runs synchronous handlers in. `list_events` and `count` take the same optional
-column filters, so a filtered listing and its total stay in step. Duplicate
-protection by `external_id` is a separate ticket, so the store stays this small
-for now. There is no object-relational mapper: nothing in the roadmap yet needs
-one.
+column filters, so a filtered listing and its total stay in step. `add_or_get`
+stores an event unless one is already stored under the same `(source,
+external_id)`, in which case it returns that event; the lookup and the insert
+run under the same lock, so two concurrent resubmissions cannot both be stored.
+There is no object-relational mapper: nothing in the roadmap yet needs one.
 
 ## Development Commands
 
@@ -437,9 +451,10 @@ started only once the API and core services are stable.
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Done |
 | AI-011 | Add batch-event ingestion | Event ingestion | Done |
 | AI-012 | Add event filtering and pagination | Event ingestion | Done |
-| AI-013 | Add duplicate-event protection | Event ingestion | Backlog |
+| AI-013 | Add duplicate-event protection | Event ingestion | Done |
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
+| AI-016 | Recognise resubmissions within a batch | Event ingestion | Backlog |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Backlog |
 | AI-021 | Detect overdue work | Risk detection | Backlog |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
@@ -492,6 +507,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
 - 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
 - 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
 - 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.

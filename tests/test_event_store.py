@@ -116,6 +116,62 @@ def test_add_rejects_a_repeated_id(store: EventStore) -> None:
     assert store.count() == 1
 
 
+def test_add_or_get_stores_a_new_event(store: EventStore) -> None:
+    event = make_event(external_id="roster-9912")
+
+    stored = store.add_or_get(event)
+
+    assert stored == event
+    assert store.get(event.id) == event
+    assert store.count() == 1
+
+
+def test_add_or_get_recognises_a_resubmission(store: EventStore) -> None:
+    first = make_event(external_id="roster-9912")
+    store.add_or_get(first)
+
+    resubmission = make_event(external_id="roster-9912", subject="Same event, sent again")
+    returned = store.add_or_get(resubmission)
+
+    assert returned.id == first.id
+    assert returned.subject == first.subject
+    assert store.count() == 1
+
+
+def test_add_or_get_scopes_the_key_to_the_source(store: EventStore) -> None:
+    store.add_or_get(make_event(source="rostering", external_id="shared-1"))
+    stored = store.add_or_get(make_event(source="integrations", external_id="shared-1"))
+
+    assert store.get(stored.id) is not None
+    assert store.count() == 2
+
+
+def test_add_or_get_never_deduplicates_without_an_external_id(store: EventStore) -> None:
+    first = store.add_or_get(make_event())
+    second = store.add_or_get(make_event())
+
+    assert first.id != second.id
+    assert store.count() == 2
+
+
+def test_add_or_get_treats_a_blank_external_id_as_no_key(store: EventStore) -> None:
+    first = store.add_or_get(make_event(external_id=""))
+    second = store.add_or_get(make_event(external_id=""))
+
+    assert first.id != second.id
+    assert store.count() == 2
+
+
+def test_add_or_get_still_rejects_a_repeated_id(store: EventStore) -> None:
+    event = make_event()
+    store.add(event)
+
+    with pytest.raises(DuplicateEventIdError):
+        store.add_or_get(event)
+
+    assert store.count() == 1
+
+
 def test_add_all_stores_every_event(store: EventStore) -> None:
     events = [make_event(subject=f"Event {index}") for index in range(3)]
 

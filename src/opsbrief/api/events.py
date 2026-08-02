@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, Response, status
 
 from opsbrief.api.dependencies import EventStoreDependency
 from opsbrief.events import (
@@ -64,14 +64,22 @@ def read_event(
     status_code=status.HTTP_201_CREATED,
     summary="Record an operational event",
     response_description="The stored event, with its service-assigned identifier.",
+    responses={
+        200: {"description": "The event was recognised as a resubmission and not stored again."}
+    },
 )
-def create_event(payload: EventInput, store: EventStoreDependency) -> Event:
+def create_event(payload: EventInput, store: EventStoreDependency, response: Response) -> Event:
     """Accept one operational event and store it.
 
     A payload that does not satisfy the event contract is rejected with 422
-    and nothing is stored.
+    and nothing is stored. A submission whose ``external_id`` the same source
+    has already sent is recognised as a resubmission: the originally stored
+    event is returned with 200 rather than stored again, so retrying a delivery
+    is safe. A newly stored event is returned with 201.
     """
-    return record_event(store, payload)
+    event, created = record_event(store, payload)
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return event
 
 
 @router.post(
