@@ -207,9 +207,17 @@ class EventBatch(BaseModel):
 class EventBatchResult(BaseModel):
     """The stored form of an accepted batch submission."""
 
-    count: int = Field(description="How many events were stored.")
+    count: int = Field(
+        description=(
+            "How many of the submitted events were newly stored; any remainder "
+            "were recognised as resubmissions and returned as already held."
+        ),
+    )
     events: list[Event] = Field(
-        description="The stored events, each with its service-assigned identifier.",
+        description=(
+            "One event per submitted event, in order: the newly stored event, or "
+            "the previously stored event where a resubmission was recognised."
+        ),
     )
 
 

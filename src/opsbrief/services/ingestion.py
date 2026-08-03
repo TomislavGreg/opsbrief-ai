@@ -31,9 +31,20 @@ def record_event(store: EventStore, payload: EventInput) -> tuple[Event, bool]:
 def record_events(store: EventStore, batch: EventBatch) -> EventBatchResult:
     """Store a validated batch of events atomically and return their stored forms.
 
-    Each event is assigned its own identity. The batch is stored all-or-nothing:
-    if any identifier clashes with a stored event, none of the batch is kept.
+    Each event is assigned its own identity. A submission carrying an
+    ``external_id`` the same source has already sent, whether stored earlier or
+    appearing earlier in this same batch, is recognised as a resubmission: the
+    previously stored event is returned in its place and nothing new is stored
+    for it, so an at-least-once producer that retries a batch does not create
+    duplicates. The batch is stored all-or-nothing: if any identifier clashes
+    with a stored event, none of the batch is kept.
+
+    The result returns one event per submitted event, in order, and its
+    ``count`` reports how many were newly stored; the remainder were recognised
+    as resubmissions and can be told apart because their ``id`` predates the
+    request.
     """
     events = [Event.from_input(payload) for payload in batch.events]
-    stored = store.add_all(events)
-    return EventBatchResult(count=len(stored), events=stored)
+    resolved = store.add_all_or_get(events)
+    stored = sum(1 for event, result in zip(events, resolved, strict=True) if result.id == event.id)
+    return EventBatchResult(count=stored, events=resolved)

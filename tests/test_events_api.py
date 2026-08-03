@@ -271,6 +271,56 @@ def test_batch_rejects_unknown_wrapper_fields(client: TestClient, store: EventSt
     assert store.count() == 0
 
 
+def test_batch_recognises_events_already_stored(client: TestClient, store: EventStore) -> None:
+    first = client.post("/events", json=submission(external_id="roster-9912")).json()
+
+    payload = {
+        "events": [
+            submission(external_id="roster-9912", subject="Sent again in a batch"),
+            submission(external_id="roster-1001", subject="A genuinely new one"),
+        ]
+    }
+    response = client.post("/events/batch", json=payload)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["count"] == 1
+    assert body["events"][0]["id"] == first["id"]
+    assert body["events"][0]["subject"] == first["subject"]
+    assert body["events"][1]["subject"] == "A genuinely new one"
+    assert store.count() == 2
+
+
+def test_batch_deduplicates_a_resubmission_within_itself(
+    client: TestClient, store: EventStore
+) -> None:
+    payload = {
+        "events": [
+            submission(external_id="roster-9912", subject="First wording"),
+            submission(external_id="roster-9912", subject="Reworded in the same batch"),
+        ]
+    }
+
+    body = client.post("/events/batch", json=payload).json()
+
+    assert body["count"] == 1
+    assert body["events"][0]["id"] == body["events"][1]["id"]
+    assert body["events"][1]["subject"] == "First wording"
+    assert store.count() == 1
+
+
+def test_batch_without_external_ids_stores_every_event(
+    client: TestClient, store: EventStore
+) -> None:
+    payload = {"events": [submission(), submission()]}
+
+    body = client.post("/events/batch", json=payload).json()
+
+    assert body["count"] == 2
+    assert body["events"][0]["id"] != body["events"][1]["id"]
+    assert store.count() == 2
+
+
 def test_batch_endpoint_is_documented(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
