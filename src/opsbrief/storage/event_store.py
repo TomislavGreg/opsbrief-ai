@@ -164,14 +164,11 @@ class EventStore:
         resubmission; callers can tell the two apart by comparing ``id``.
         """
         with self._lock, self._connection:
-            if event.external_id:
-                row = self._connection.execute(
-                    f"{_SELECT} WHERE source = :source AND external_id = :external_id "
-                    "ORDER BY received_at, id LIMIT 1",
-                    {"source": event.source, "external_id": event.external_id},
-                ).fetchone()
-                if row is not None:
-                    return _from_row(row)
+            key = self._resubmission_key(event)
+            if key is not None:
+                stored = self._find_by_key(key)
+                if stored is not None:
+                    return stored
             self._insert(event)
         return event
 
@@ -206,6 +203,73 @@ class EventStore:
                     "the batch contains an event id that is already stored"
                 ) from error
         return events
+
+    def add_all_or_get(self, events: list[Event]) -> list[Event]:
+        """Store each event, or return the one already held under its key, atomically.
+
+        This is :meth:`add_or_get` applied across a batch under a single lock and
+        transaction. An event carrying an ``external_id`` is deduplicated per
+        ``source``, matched both against events already stored and against
+        earlier events in the same batch: the first submission under a
+        ``(source, external_id)`` key is stored, and any later one sharing that
+        key returns that event instead of being stored again. An event with no
+        ``external_id`` carries no resubmission key and is always stored.
+
+        Returns one event per submitted event, in the submitted order: the newly
+        stored event where it was stored, and the previously stored event where
+        the submission was recognised as a resubmission, so a caller can tell the
+        two apart by comparing ``id``. The new events are stored all-or-nothing:
+        if any of their identifiers clashes with stored history the whole insert
+        is rolled back and :class:`DuplicateEventIdError` is raised, so a batch
+        never reaches storage partly applied. An empty list stores nothing.
+        """
+        if not events:
+            return []
+        resolved: list[Event] = []
+        to_insert: list[Event] = []
+        with self._lock, self._connection:
+            seen: dict[tuple[str, str], Event] = {}
+            for event in events:
+                key = self._resubmission_key(event)
+                if key is not None:
+                    earlier = seen.get(key)
+                    if earlier is not None:
+                        resolved.append(earlier)
+                        continue
+                    stored = self._find_by_key(key)
+                    if stored is not None:
+                        seen[key] = stored
+                        resolved.append(stored)
+                        continue
+                    seen[key] = event
+                resolved.append(event)
+                to_insert.append(event)
+            try:
+                self._connection.executemany(_INSERT, [_to_row(event) for event in to_insert])
+            except sqlite3.IntegrityError as error:
+                raise DuplicateEventIdError(
+                    "the batch contains an event id that is already stored"
+                ) from error
+        return resolved
+
+    @staticmethod
+    def _resubmission_key(event: Event) -> tuple[str, str] | None:
+        """Return the ``(source, external_id)`` key an event deduplicates on, if any."""
+        return (event.source, event.external_id) if event.external_id else None
+
+    def _find_by_key(self, key: tuple[str, str]) -> Event | None:
+        """Return the earliest event stored under a resubmission key, or ``None``.
+
+        The caller holds the store lock. The first submission under a key wins, so
+        the oldest match is returned when more than one somehow shares the key.
+        """
+        source, external_id = key
+        row = self._connection.execute(
+            f"{_SELECT} WHERE source = :source AND external_id = :external_id "
+            "ORDER BY received_at, id LIMIT 1",
+            {"source": source, "external_id": external_id},
+        ).fetchone()
+        return None if row is None else _from_row(row)
 
     def get(self, event_id: str) -> Event | None:
         """Return the stored event with ``event_id``, or ``None`` if there is none."""

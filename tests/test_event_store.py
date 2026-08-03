@@ -207,6 +207,88 @@ def test_add_all_rejects_ids_already_stored(store: EventStore) -> None:
     assert store.count() == 1
 
 
+def test_add_all_or_get_stores_a_batch_of_new_events(store: EventStore) -> None:
+    events = [make_event(subject=f"Event {index}") for index in range(3)]
+
+    returned = store.add_all_or_get(events)
+
+    assert returned == events
+    assert store.count() == 3
+
+
+def test_add_all_or_get_stores_nothing_for_an_empty_batch(store: EventStore) -> None:
+    assert store.add_all_or_get([]) == []
+    assert store.count() == 0
+
+
+def test_add_all_or_get_recognises_events_already_stored(store: EventStore) -> None:
+    first = make_event(external_id="roster-9912")
+    store.add_or_get(first)
+
+    resubmission = make_event(external_id="roster-9912", subject="Sent again in a batch")
+    fresh = make_event(external_id="roster-1001")
+    returned = store.add_all_or_get([resubmission, fresh])
+
+    assert returned[0].id == first.id
+    assert returned[0].subject == first.subject
+    assert returned[1].id == fresh.id
+    assert store.count() == 2
+
+
+def test_add_all_or_get_deduplicates_within_the_batch(store: EventStore) -> None:
+    first = make_event(external_id="roster-9912", subject="First wording")
+    duplicate = make_event(external_id="roster-9912", subject="Reworded in the same batch")
+
+    returned = store.add_all_or_get([first, duplicate])
+
+    assert returned[0].id == first.id
+    assert returned[1].id == first.id
+    assert returned[1].subject == "First wording"
+    assert store.count() == 1
+
+
+def test_add_all_or_get_scopes_the_key_to_the_source(store: EventStore) -> None:
+    returned = store.add_all_or_get(
+        [
+            make_event(source="rostering", external_id="shared-1"),
+            make_event(source="integrations", external_id="shared-1"),
+        ]
+    )
+
+    assert returned[0].id != returned[1].id
+    assert store.count() == 2
+
+
+def test_add_all_or_get_never_deduplicates_without_an_external_id(store: EventStore) -> None:
+    returned = store.add_all_or_get([make_event(), make_event()])
+
+    assert returned[0].id != returned[1].id
+    assert store.count() == 2
+
+
+def test_add_all_or_get_is_all_or_nothing_on_a_repeated_id(store: EventStore) -> None:
+    duplicate = make_event()
+
+    with pytest.raises(DuplicateEventIdError):
+        store.add_all_or_get([make_event(), duplicate, duplicate])
+
+    assert store.count() == 0
+
+
+def test_add_all_or_get_keeps_a_stored_resubmission_when_a_later_id_clashes(
+    store: EventStore,
+) -> None:
+    existing = make_event(external_id="roster-9912")
+    store.add_or_get(existing)
+    clash = make_event()
+    store.add(clash)
+
+    with pytest.raises(DuplicateEventIdError):
+        store.add_all_or_get([make_event(external_id="roster-9912"), clash])
+
+    assert store.count() == 2
+
+
 def test_events_are_listed_most_recently_occurred_first(store: EventStore) -> None:
     older = make_event(occurred_at=OCCURRED_AT - timedelta(hours=2))
     newer = make_event(occurred_at=OCCURRED_AT + timedelta(hours=2))
