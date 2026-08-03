@@ -43,7 +43,8 @@ produced it.
   identifier and stores it, recognising a resubmission carrying an
   `external_id` the same source has already sent rather than storing it twice.
 - A `POST /events/batch` endpoint that validates a bounded batch of events and
-  stores them together, all-or-nothing.
+  stores them together, all-or-nothing, recognising a resubmission carrying an
+  `external_id` already seen from the same source rather than storing it twice.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
   source, type, severity or status and paginated with `limit` and `offset`.
 - A `GET /events/{event_id}` endpoint that returns a single stored event, or
@@ -248,6 +249,13 @@ its own `id` and `received_at`:
 A batch holds between 1 and 500 events. It is validated and stored as a whole:
 if any event fails the contract the request is answered with `422` and nothing
 is stored, and the insert is atomic, so a batch is never partly applied.
+Resubmissions are recognised inside a batch exactly as they are for a single
+event: an `external_id` the same source has already sent, whether stored by an
+earlier request or repeated within this same batch, returns the previously
+stored event in its place rather than creating a duplicate. The response returns
+one event per submitted event, in order, and `count` reports how many were
+newly stored — equal to the batch size when every event is new, and lower when
+some were recognised as resubmissions.
 
 List stored events, most recently occurred first:
 
@@ -299,8 +307,8 @@ does not create a duplicate. The first submission wins: a resubmission that
 reworded the same `external_id` still returns the event as first stored. An
 event with no `external_id` carries no such key and is always stored. The key is
 scoped to the `source`, so two producers may use the same `external_id` without
-colliding. Recognising resubmissions inside a `POST /events/batch` request is
-AI-016.
+colliding. A `POST /events/batch` request recognises resubmissions the same way,
+described above.
 
 Further endpoints are documented here as they are built.
 
@@ -364,6 +372,9 @@ with EventStore.open("sqlite:///./opsbrief.db") as store:
     resend = Event.from_input(EventInput(**submitted_payload))
     kept = store.add_or_get(resend)  # The event stored under the resubmission key
 
+    batch = [Event.from_input(EventInput(**payload)) for payload in submitted_batch]
+    resolved = store.add_all_or_get(batch)  # New events stored, resubmissions returned as held
+
     stored = store.get(event.id)  # The stored event, or None
     recent = store.list_events(limit=50)  # Most recently occurred first
     failures = store.list_events(source="integrations", severity=EventSeverity.HIGH)
@@ -385,7 +396,11 @@ column filters, so a filtered listing and its total stay in step. `add_or_get`
 stores an event unless one is already stored under the same `(source,
 external_id)`, in which case it returns that event; the lookup and the insert
 run under the same lock, so two concurrent resubmissions cannot both be stored.
-There is no object-relational mapper: nothing in the roadmap yet needs one.
+`add_all_or_get` applies that same recognition across a batch under a single
+lock and transaction, deduplicating each event against both stored events and
+earlier events in the same batch, so a resubmitted batch stays all-or-nothing
+and never lands a duplicate. There is no object-relational mapper: nothing in
+the roadmap yet needs one.
 
 ## Development Commands
 
@@ -454,7 +469,7 @@ started only once the API and core services are stable.
 | AI-013 | Add duplicate-event protection | Event ingestion | Done |
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
-| AI-016 | Recognise resubmissions within a batch | Event ingestion | Backlog |
+| AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Backlog |
 | AI-021 | Detect overdue work | Risk detection | Backlog |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
@@ -507,6 +522,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
 - 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
 - 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
 - 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
