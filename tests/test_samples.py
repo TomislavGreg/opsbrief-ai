@@ -1,0 +1,64 @@
+"""Tests for the synthetic operational-event fixtures."""
+
+from datetime import UTC
+
+from fastapi.testclient import TestClient
+
+from opsbrief.events import EventInput
+from opsbrief.samples import load_sample_events
+
+
+def test_load_returns_validated_event_inputs() -> None:
+    events = load_sample_events()
+
+    assert len(events) > 1
+    assert all(isinstance(event, EventInput) for event in events)
+
+
+def test_timestamps_are_timezone_aware_utc() -> None:
+    for event in load_sample_events():
+        assert event.occurred_at.tzinfo is not None
+        assert event.occurred_at.utcoffset() == UTC.utcoffset(None)
+        if event.due_at is not None:
+            assert event.due_at.utcoffset() == UTC.utcoffset(None)
+
+
+def test_external_ids_are_unique_per_source() -> None:
+    keys = [
+        (event.source, event.external_id)
+        for event in load_sample_events()
+        if event.external_id is not None
+    ]
+
+    assert len(keys) == len(set(keys))
+
+
+def test_fixtures_cover_several_sources() -> None:
+    sources = {event.source for event in load_sample_events()}
+
+    assert {"rostering", "tasks", "integrations", "quality"} <= sources
+
+
+def test_repeated_integration_failure_is_present() -> None:
+    failures = [
+        event
+        for event in load_sample_events()
+        if event.event_type == "integration.failed" and event.entity_id == "ticketing-webhook"
+    ]
+
+    assert len(failures) >= 3
+
+
+def test_fixtures_ingest_through_the_batch_endpoint(client: TestClient) -> None:
+    events = load_sample_events()
+
+    response = client.post(
+        "/events/batch",
+        json={"events": [event.model_dump(mode="json") for event in events]},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["count"] == len(events)
+    assert len(body["events"]) == len(events)
+    assert all(stored["id"] for stored in body["events"])
