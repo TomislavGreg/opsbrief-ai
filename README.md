@@ -49,6 +49,9 @@ produced it.
   source, type, severity or status and paginated with `limit` and `offset`.
 - A `GET /events/{event_id}` endpoint that returns a single stored event, or
   404 when no event carries that identifier.
+- A set of synthetic operational-event fixtures, loadable as validated event
+  payloads, describing one event day at a venue for use in demos, documentation
+  and later phases.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -63,6 +66,7 @@ description of working software.
 src/opsbrief/
   api/          FastAPI routers, one module per resource
   events/       Operational event schema
+  samples/      Synthetic operational-event fixtures and their loader
   services/     Logic behind the routers
   storage/      SQLite connection handling and the event store
   config.py     Environment-backed settings
@@ -402,6 +406,27 @@ earlier events in the same batch, so a resubmitted batch stays all-or-nothing
 and never lands a duplicate. There is no object-relational mapper: nothing in
 the roadmap yet needs one.
 
+## Sample Data
+
+The package ships a small set of synthetic operational events describing one
+event day at a venue: unfilled shifts, an overdue safety inspection, blocked
+work, a ticketing integration failing several times before it recovers, a
+rejected quality check and a power alert. They give demos, documentation and
+later phases realistic material without anyone hand-writing payloads.
+
+```python
+from opsbrief.samples import load_sample_events
+
+events = load_sample_events()  # Validated EventInput models
+```
+
+The fixtures are read from `src/opsbrief/samples/events.json` and validated
+through the same contract producers submit against, so a fixture that drifts out
+of line with the schema fails loudly rather than misleading a demo. Each event
+carries an `external_id`, so a batch of them can be resubmitted without creating
+duplicates. The data is entirely fictional: this is a public repository and the
+fixtures contain no private, customer or personal data.
+
 ## Development Commands
 
 ```bash
@@ -467,7 +492,7 @@ started only once the API and core services are stable.
 | AI-011 | Add batch-event ingestion | Event ingestion | Done |
 | AI-012 | Add event filtering and pagination | Event ingestion | Done |
 | AI-013 | Add duplicate-event protection | Event ingestion | Done |
-| AI-014 | Add sample operational-event fixtures | Event ingestion | Backlog |
+| AI-014 | Add sample operational-event fixtures | Event ingestion | Done |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Backlog |
@@ -522,6 +547,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
 - 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
 - 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
 - 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
