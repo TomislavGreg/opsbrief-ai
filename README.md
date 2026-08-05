@@ -52,6 +52,10 @@ produced it.
 - A set of synthetic operational-event fixtures, loadable as validated event
   payloads, describing one event day at a venue for use in demos, documentation
   and later phases.
+- A deterministic risk contract and rule interface: a `Risk` that names the rule
+  and the source event IDs behind it, a `RiskRule` protocol, and a `detect_risks`
+  detector that runs a set of rules over stored events. No rules ship yet; the
+  concrete rules that raise risks arrive in the tickets that follow.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -66,6 +70,7 @@ description of working software.
 src/opsbrief/
   api/          FastAPI routers, one module per resource
   events/       Operational event schema
+  risks/        Deterministic risk contract and rule interface
   samples/      Synthetic operational-event fixtures and their loader
   services/     Logic behind the routers
   storage/      SQLite connection handling and the event store
@@ -427,6 +432,34 @@ carries an `external_id`, so a batch of them can be resubmitted without creating
 duplicates. The data is entirely fictional: this is a public repository and the
 fixtures contain no private, customer or personal data.
 
+## Risk Detection
+
+Risks are recognised by deterministic rules, never by a language model. A rule
+reads a batch of stored events and returns the risks it finds; a model may later
+rephrase a risk, but it never decides that one exists. Every risk names the rule
+that raised it and the source event IDs behind it, so a reader can trace the
+claim back to the evidence.
+
+```python
+from opsbrief.risks import Risk, RiskRule, RiskSeverity, detect_risks
+
+risks = detect_risks(events, rules)  # events: stored Events, rules: RiskRule instances
+```
+
+A `Risk` carries the `rule` that raised it, a `title` and `detail` explaining
+it, a `severity` (`low`, `medium`, `high` or `critical` — a risk always
+deserves attention, so there is no `info` level), and the `event_ids` behind
+it. The model refuses to be built without a rule and at least one distinct,
+non-blank source event, so a risk can never claim to exist without evidence.
+
+A `RiskRule` is a small protocol: a stable `rule_id` and an `evaluate(events)`
+that returns the risks the rule recognises, each tagged with that `rule_id`.
+Rules are independent and deterministic — the same events always yield the same
+risks — so `detect_risks` runs a set of them over one shared sequence of events
+and collects what they raise, rule by rule, without mutating the events. This is
+the interface only; the concrete rules that populate it, and the priority
+scoring and API endpoint that surface their output, arrive in later tickets.
+
 ## Development Commands
 
 ```bash
@@ -495,7 +528,7 @@ started only once the API and core services are stable.
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Done |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
-| AI-020 | Define explainable risk-rule interface | Risk detection | In Progress |
+| AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Backlog |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
 | AI-023 | Detect repeated integration failures | Risk detection | Backlog |
@@ -547,6 +580,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
 - 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
 - 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
 - 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
