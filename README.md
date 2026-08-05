@@ -529,7 +529,7 @@ started only once the API and core services are stable.
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
-| AI-021 | Detect overdue work | Risk detection | Backlog |
+| AI-021 | Detect overdue work | Risk detection | In Progress |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
 | AI-023 | Detect repeated integration failures | Risk detection | Backlog |
 | AI-024 | Add risk priority scoring | Risk detection | Backlog |
