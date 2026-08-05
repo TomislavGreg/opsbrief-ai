@@ -495,7 +495,7 @@ started only once the API and core services are stable.
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Done |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
-| AI-020 | Define explainable risk-rule interface | Risk detection | Backlog |
+| AI-020 | Define explainable risk-rule interface | Risk detection | In Progress |
 | AI-021 | Detect overdue work | Risk detection | Backlog |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
 | AI-023 | Detect repeated integration failures | Risk detection | Backlog |
