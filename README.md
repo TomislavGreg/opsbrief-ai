@@ -54,8 +54,10 @@ produced it.
   and later phases.
 - A deterministic risk contract and rule interface: a `Risk` that names the rule
   and the source event IDs behind it, a `RiskRule` protocol, and a `detect_risks`
-  detector that runs a set of rules over stored events. No rules ship yet; the
-  concrete rules that raise risks arrive in the tickets that follow.
+  detector that runs a set of rules over stored events.
+- An overdue-work rule that raises a risk for every event past its deadline and
+  not yet resolved or cancelled, escalating from medium to high once the work is
+  at least a day late, most overdue first.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -456,9 +458,29 @@ A `RiskRule` is a small protocol: a stable `rule_id` and an `evaluate(events)`
 that returns the risks the rule recognises, each tagged with that `rule_id`.
 Rules are independent and deterministic — the same events always yield the same
 risks — so `detect_risks` runs a set of them over one shared sequence of events
-and collects what they raise, rule by rule, without mutating the events. This is
-the interface only; the concrete rules that populate it, and the priority
-scoring and API endpoint that surface their output, arrive in later tickets.
+and collects what they raise, rule by rule, without mutating the events.
+
+The first rule is `OverdueWorkRule`. Work is overdue when it carried a `due_at`
+that has passed and is not yet resolved or cancelled; work exactly at its
+deadline is not yet overdue. The rule is built with the reference instant it
+judges against, so the same events at the same instant always yield the same
+risks, and a test can pin the boundary exactly:
+
+```python
+from datetime import datetime, timezone
+
+from opsbrief.risks import OverdueWorkRule, detect_risks
+
+now = datetime.now(timezone.utc)
+risks = detect_risks(events, [OverdueWorkRule(now)])
+```
+
+Each risk cites the single overdue event behind it. A risk is `medium` until the
+work is at least a day late, when it escalates to `high`, and the risks come back
+most overdue first. Ranking risks from different rules against each other is a
+separate concern, handled by the priority scoring in a later ticket, along with
+the API endpoint that surfaces the results. The blocked-work and repeated
+integration-failure rules follow the same interface.
 
 ## Development Commands
 
@@ -529,7 +551,7 @@ started only once the API and core services are stable.
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
-| AI-021 | Detect overdue work | Risk detection | In Progress |
+| AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Backlog |
 | AI-023 | Detect repeated integration failures | Risk detection | Backlog |
 | AI-024 | Add risk priority scoring | Risk detection | Backlog |
@@ -580,6 +602,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
 - 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
 - 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
 - 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
