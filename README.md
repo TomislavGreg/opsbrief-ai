@@ -58,6 +58,9 @@ produced it.
 - An overdue-work rule that raises a risk for every event past its deadline and
   not yet resolved or cancelled, escalating from medium to high once the work is
   at least a day late, most overdue first.
+- A blocked-work rule that raises a risk for every event a producer reported as
+  blocked, with or without a deadline, escalating from medium to high once the
+  work has been blocked for at least a day, longest blocked first.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -477,10 +480,30 @@ risks = detect_risks(events, [OverdueWorkRule(now)])
 
 Each risk cites the single overdue event behind it. A risk is `medium` until the
 work is at least a day late, when it escalates to `high`, and the risks come back
-most overdue first. Ranking risks from different rules against each other is a
-separate concern, handled by the priority scoring in a later ticket, along with
-the API endpoint that surfaces the results. The blocked-work and repeated
-integration-failure rules follow the same interface.
+most overdue first.
+
+The second rule is `BlockedWorkRule`. Work is blocked when its producer said so:
+the rule trusts the stated `status` of `blocked` rather than inferring one, and a
+deadline is not required — work that cannot move is a concern whether or not a
+clock is running on it. Like the overdue rule it is built with the reference
+instant it judges against, and it escalates by duration: a risk is `medium` until
+the work has been blocked for at least a day, measured from when the event was
+reported, when it escalates to `high`. Each risk cites the single blocked event,
+and the risks come back longest-blocked first, ties broken by event id.
+
+```python
+from datetime import datetime, timezone
+
+from opsbrief.risks import BlockedWorkRule, OverdueWorkRule, detect_risks
+
+now = datetime.now(timezone.utc)
+risks = detect_risks(events, [OverdueWorkRule(now), BlockedWorkRule(now)])
+```
+
+Ranking risks from different rules against each other is a separate concern,
+handled by the priority scoring in a later ticket, along with the API endpoint
+that surfaces the results. The repeated integration-failure rule follows the same
+interface.
 
 ## Development Commands
 
@@ -552,7 +575,7 @@ started only once the API and core services are stable.
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
-| AI-022 | Detect blocked operational work | Risk detection | In Progress |
+| AI-022 | Detect blocked operational work | Risk detection | Done |
 | AI-023 | Detect repeated integration failures | Risk detection | Backlog |
 | AI-024 | Add risk priority scoring | Risk detection | Backlog |
 | AI-025 | Add risk-list API endpoint | Risk detection | Backlog |
@@ -602,6 +625,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
 - 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
 - 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
 - 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
@@ -615,8 +639,6 @@ it is not picked up and left half-finished.
 - 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
 - 2026-07-29 — Added the operational event schema, its validation rules and tests.
 - 2026-07-28 — Added the container image, Compose setup and Docker development commands.
-- 2026-07-28 — Recorded the GitHub Actions Node 20 deprecation as AI-006 and documented why workflow changes need manual application.
-- 2026-07-28 — Initialized the project: FastAPI application, health endpoint, settings, test suite, linting and CI.
 
 ## Future Game Center Integration
 
