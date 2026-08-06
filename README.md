@@ -576,7 +576,7 @@ started only once the API and core services are stable.
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
-| AI-023 | Detect repeated integration failures | Risk detection | Backlog |
+| AI-023 | Detect repeated integration failures | Risk detection | In Progress |
 | AI-024 | Add risk priority scoring | Risk detection | Backlog |
 | AI-025 | Add risk-list API endpoint | Risk detection | Backlog |
 | AI-030 | Define the AI provider interface | AI daily briefs | Backlog |
