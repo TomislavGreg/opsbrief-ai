@@ -61,6 +61,10 @@ produced it.
 - A blocked-work rule that raises a risk for every event a producer reported as
   blocked, with or without a deadline, escalating from medium to high once the
   work has been blocked for at least a day, longest blocked first.
+- A repeated-integration-failure rule that raises a risk for every integration
+  that has failed at least three times within the last week without recovering
+  since, citing every failure behind it, high and escalating to critical for a
+  larger run, most failures first.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -500,10 +504,37 @@ now = datetime.now(timezone.utc)
 risks = detect_risks(events, [OverdueWorkRule(now), BlockedWorkRule(now)])
 ```
 
+The third rule is `RepeatedIntegrationFailureRule`. A single failure is noise; the
+same integration failing again and again is a risk. The rule groups failures by
+the integration they name — an event whose `status` is `failed` and that carries
+an `entity_id`, so it can be attributed — and raises a risk once one integration
+has failed at least three times within the last week. A failure names its
+integration through `entity_id`, so a failure with no entity is left to other
+rules. A recovery (a `resolved` event for the same integration) that lands after a
+run of failures clears it, the same way a `resolved` status clears overdue work,
+so a manager sees integrations failing now rather than ones that already came
+back. Each risk cites every failure behind it, oldest first; severity is `high`,
+rising to `critical` for a run of five or more; and the risks come back
+most-failures first, ties broken by the first cited event id.
+
+```python
+from datetime import datetime, timezone
+
+from opsbrief.risks import (
+    BlockedWorkRule,
+    OverdueWorkRule,
+    RepeatedIntegrationFailureRule,
+    detect_risks,
+)
+
+now = datetime.now(timezone.utc)
+rules = [OverdueWorkRule(now), BlockedWorkRule(now), RepeatedIntegrationFailureRule(now)]
+risks = detect_risks(events, rules)
+```
+
 Ranking risks from different rules against each other is a separate concern,
 handled by the priority scoring in a later ticket, along with the API endpoint
-that surfaces the results. The repeated integration-failure rule follows the same
-interface.
+that surfaces the results.
 
 ## Development Commands
 
@@ -576,7 +607,7 @@ started only once the API and core services are stable.
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
-| AI-023 | Detect repeated integration failures | Risk detection | In Progress |
+| AI-023 | Detect repeated integration failures | Risk detection | Done |
 | AI-024 | Add risk priority scoring | Risk detection | Backlog |
 | AI-025 | Add risk-list API endpoint | Risk detection | Backlog |
 | AI-030 | Define the AI provider interface | AI daily briefs | Backlog |
@@ -625,6 +656,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
 - 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
 - 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
 - 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
@@ -638,7 +670,6 @@ it is not picked up and left half-finished.
 - 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
 - 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
 - 2026-07-29 — Added the operational event schema, its validation rules and tests.
-- 2026-07-28 — Added the container image, Compose setup and Docker development commands.
 
 ## Future Game Center Integration
 
