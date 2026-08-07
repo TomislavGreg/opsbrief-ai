@@ -15,9 +15,10 @@ Language models have no part here. Rules decide what counts as a risk and how
 urgent it is; a model may later rephrase a risk, but it never invents one.
 """
 
+from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
 class RiskSeverity(StrEnum):
@@ -84,3 +85,37 @@ class Risk(BaseModel):
                 raise ValueError(f"event_ids must be unique; {event_id!r} appears more than once")
             seen.add(event_id)
         return value
+
+
+class RiskList(BaseModel):
+    """A snapshot of the risks recognised across the stored events.
+
+    The list is what a risk-list endpoint returns: the current risks in priority
+    order, most urgent first, together with the reference instant the rules
+    judged against. That instant is part of the answer because risk is
+    time-dependent — work overdue now was not overdue an hour ago — so a reader
+    knows exactly when the picture was taken. Every risk in the list still names
+    the rule and the source events behind it, so the whole snapshot stays
+    traceable to the evidence.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    generated_at: datetime = Field(
+        description="The reference instant the rules judged against, in UTC.",
+    )
+    risks: list[Risk] = Field(
+        description="The recognised risks, ordered most urgent first.",
+    )
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="How many risks the snapshot holds.",
+    )
+    @property
+    def total(self) -> int:
+        """Return the number of risks in the snapshot.
+
+        It is derived from ``risks`` rather than stored, so it can never disagree
+        with the list it counts.
+        """
+        return len(self.risks)
