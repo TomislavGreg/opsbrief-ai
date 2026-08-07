@@ -65,6 +65,10 @@ produced it.
   that has failed at least three times within the last week without recovering
   since, citing every failure behind it, high and escalating to critical for a
   larger run, most failures first.
+- Deterministic priority scoring that ranks risks from different rules against
+  each other: severity decides the order, the amount of evidence breaks ties, and
+  the rest is settled by rule, title and event id, so the most pressing risk
+  comes first whatever rule raised it.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -532,9 +536,27 @@ rules = [OverdueWorkRule(now), BlockedWorkRule(now), RepeatedIntegrationFailureR
 risks = detect_risks(events, rules)
 ```
 
-Ranking risks from different rules against each other is a separate concern,
-handled by the priority scoring in a later ticket, along with the API endpoint
-that surfaces the results.
+`detect_risks` gathers each rule's risks in the order the rules are given, which
+is not an order of urgency: the overdue rule's risks precede the integration
+rule's simply because it ran first. Ranking them against each other is
+`prioritize`, a deterministic ordering that reads only the risks themselves:
+
+```python
+from opsbrief.risks import prioritize, priority_score
+
+ranked = prioritize(risks)  # Most pressing first, whatever rule raised each
+top = priority_score(ranked[0])  # Coarse priority, 1 (low) to 4 (critical)
+```
+
+Severity is the dominant signal — a `critical` risk always outranks a `high`
+one, and no weight of evidence lifts a lower severity above a higher one.
+`priority_score` is exactly that severity, as an integer from 1 to 4. Within a
+severity the risk backed by more source events comes first, on the view that
+more evidence means a more pressing concern; anything still tied is settled by
+rule, then title, then first event id, so the order is total and never depends
+on the order the risks arrived in. No language model takes part: like detection,
+the ranking is a deterministic rule over the evidence. The API endpoint that
+surfaces prioritized risks follows in its own ticket.
 
 ## Development Commands
 
@@ -608,7 +630,7 @@ started only once the API and core services are stable.
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
 | AI-023 | Detect repeated integration failures | Risk detection | Done |
-| AI-024 | Add risk priority scoring | Risk detection | Backlog |
+| AI-024 | Add risk priority scoring | Risk detection | Done |
 | AI-025 | Add risk-list API endpoint | Risk detection | Backlog |
 | AI-030 | Define the AI provider interface | AI daily briefs | Backlog |
 | AI-031 | Add deterministic test provider | AI daily briefs | Backlog |
@@ -656,6 +678,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
 - 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
 - 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
 - 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
@@ -669,7 +692,6 @@ it is not picked up and left half-finished.
 - 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
 - 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
 - 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
-- 2026-07-29 — Added the operational event schema, its validation rules and tests.
 
 ## Future Game Center Integration
 
