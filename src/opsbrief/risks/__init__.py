@@ -6,8 +6,9 @@ from opsbrief.risks.rules import (
     BlockedWorkRule,
     OverdueWorkRule,
     RepeatedIntegrationFailureRule,
+    default_rules,
 )
-from opsbrief.risks.schema import Risk, RiskSeverity
+from opsbrief.risks.schema import Risk, RiskList, RiskSeverity
 
 __all__ = [
     "SEVERITY_WEIGHT",
@@ -15,8 +16,10 @@ __all__ = [
     "OverdueWorkRule",
     "RepeatedIntegrationFailureRule",
     "Risk",
+    "RiskList",
     "RiskRule",
     "RiskSeverity",
+    "default_rules",
     "detect_risks",
     "prioritize",
     "priority_score",
