@@ -69,6 +69,9 @@ produced it.
   each other: severity decides the order, the amount of evidence breaks ties, and
   the rest is settled by rule, title and event id, so the most pressing risk
   comes first whatever rule raised it.
+- A `GET /risks` endpoint that runs every risk rule over the stored events and
+  returns the current risks most urgent first, each naming the rule and source
+  events behind it, with the reference instant the snapshot was judged against.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -332,6 +335,45 @@ scoped to the `source`, so two producers may use the same `external_id` without
 colliding. A `POST /events/batch` request recognises resubmissions the same way,
 described above.
 
+List the current operational risks, most urgent first:
+
+```bash
+curl http://127.0.0.1:8000/risks
+```
+
+The service answers `200 OK` with the risks recognised across the stored events,
+each naming the rule and the source events behind it, and the reference instant
+the snapshot was judged against:
+
+```json
+{
+  "generated_at": "2026-07-29T18:00:00Z",
+  "total": 2,
+  "risks": [
+    {
+      "rule": "repeated_integration_failure",
+      "title": "Integration ticketing has failed 5 times",
+      "detail": "Integration \"ticketing\" (source: integrations) has failed 5 times ...",
+      "severity": "critical",
+      "event_ids": ["e17", "e18", "e19", "e20", "e21"]
+    },
+    {
+      "rule": "overdue_work",
+      "title": "Safety inspection for North Stand is overdue",
+      "detail": "Work \"Safety inspection for North Stand\" was due at ...",
+      "severity": "high",
+      "event_ids": ["e04"]
+    }
+  ]
+}
+```
+
+The endpoint takes no parameters: it always reports the whole current picture.
+Risks are ordered by priority — severity first, then evidence, as described under
+[Risk Detection](#risk-detection) — so the first risk is the one to act on first.
+`total` counts the risks, and `generated_at` records when the snapshot was taken,
+because a risk is judged against a moment in time.
+
 Further endpoints are documented here as they are built.
 
 ## Event Schema
@@ -555,8 +597,13 @@ severity the risk backed by more source events comes first, on the view that
 more evidence means a more pressing concern; anything still tied is settled by
 rule, then title, then first event id, so the order is total and never depends
 on the order the risks arrived in. No language model takes part: like detection,
-the ranking is a deterministic rule over the evidence. The API endpoint that
-surfaces prioritized risks follows in its own ticket.
+the ranking is a deterministic rule over the evidence.
+
+The `GET /risks` endpoint surfaces exactly this: it runs the canonical rule set
+over the whole stored event history at the moment of the request and returns the
+prioritized risks. The reference instant is part of the answer, because a risk is
+judged against a moment in time, and every risk still cites the rule and the
+source events behind it. An example is shown under [API Examples](#api-examples).
 
 ## Development Commands
 
@@ -631,7 +678,7 @@ started only once the API and core services are stable.
 | AI-022 | Detect blocked operational work | Risk detection | Done |
 | AI-023 | Detect repeated integration failures | Risk detection | Done |
 | AI-024 | Add risk priority scoring | Risk detection | Done |
-| AI-025 | Add risk-list API endpoint | Risk detection | Backlog |
+| AI-025 | Add risk-list API endpoint | Risk detection | Done |
 | AI-030 | Define the AI provider interface | AI daily briefs | Backlog |
 | AI-031 | Add deterministic test provider | AI daily briefs | Backlog |
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Backlog |
@@ -678,6 +725,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
 - 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
 - 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
 - 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
@@ -691,7 +739,6 @@ it is not picked up and left half-finished.
 - 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
 - 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
 - 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
-- 2026-07-29 — Raised the GitHub Actions versions to the Node 24 compatible majors, clearing the deprecation warning.
 
 ## Future Game Center Integration
 
