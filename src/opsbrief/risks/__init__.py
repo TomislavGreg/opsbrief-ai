@@ -1,7 +1,7 @@
 """Risk detection: deterministic, explainable rules over stored events."""
 
 from opsbrief.risks.engine import RiskRule, detect_risks
-from opsbrief.risks.priority import SEVERITY_WEIGHT, priority_score
+from opsbrief.risks.priority import SEVERITY_WEIGHT, prioritize, priority_score
 from opsbrief.risks.rules import (
     BlockedWorkRule,
     OverdueWorkRule,
@@ -18,5 +18,6 @@ __all__ = [
     "RiskRule",
     "RiskSeverity",
     "detect_risks",
+    "prioritize",
     "priority_score",
 ]
