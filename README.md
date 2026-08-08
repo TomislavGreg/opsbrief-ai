@@ -76,6 +76,10 @@ produced it.
   contract and an `AIProvider` protocol that turns already-assembled material into
   prose, used only for phrasing and never for deciding risks, with its output
   treated as untrusted data.
+- A deterministic fake AI provider that returns scripted or echoed completions
+  without calling a real model, and a `create_provider` factory that selects the
+  provider named by `OPSBRIEF_AI_PROVIDER`, so tests and local runs are
+  repeatable and offline.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -651,6 +655,49 @@ timeout, an unparseable reply — it raises `AIProviderError` rather than return
 an empty or invented one. Concrete providers, starting with a deterministic fake
 for tests, implement this protocol in their own modules.
 
+### The fake provider
+
+Tests must never call a real model: real calls are slow, cost money and, worst of
+all, are non-deterministic, so a test that asserted on their output would be
+flaky. `FakeAIProvider` stands in with behaviour that is a pure function of the
+request.
+
+```python
+from opsbrief.ai import CompletionRequest, FakeAIProvider
+
+# Script exactly what the "model" returns, in order:
+provider = FakeAIProvider(responses=['{"summary": "Two integrations failed."}'])
+provider.complete(CompletionRequest(instructions="Summarise as JSON.")).text
+# -> '{"summary": "Two integrations failed."}'
+
+# Once the script runs out, it echoes the request's material, bounded and stable:
+provider.complete(CompletionRequest(instructions="x", input="  many   spaces  ")).text
+# -> 'many spaces'
+
+provider.requests  # every CompletionRequest it received, in order
+```
+
+Scripted responses are returned verbatim, so a test can pin exactly what the
+model "says" and exercise how the service parses and validates it. When the
+script is exhausted the provider echoes the request's `input` (or its
+`instructions` when there is no input), condensed to one line and truncated to
+the request's `max_output_tokens`, so even the fallback honours the same output
+bound a real provider would. Every request is recorded on `provider.requests`,
+so a test can assert what the service actually asked for.
+
+The active provider is chosen by configuration rather than hard-coded. Callers
+ask `create_provider` for whatever `OPSBRIEF_AI_PROVIDER` names:
+
+```python
+from opsbrief.ai import create_provider
+
+provider = create_provider()  # uses the application settings
+```
+
+Only the fake provider is implemented so far; an unknown name is refused with a
+`ValueError` rather than silently ignored, so a misconfiguration fails loudly at
+wiring time instead of producing empty briefs later.
+
 ## Development Commands
 
 ```bash
@@ -726,7 +773,7 @@ started only once the API and core services are stable.
 | AI-024 | Add risk priority scoring | Risk detection | Done |
 | AI-025 | Add risk-list API endpoint | Risk detection | Done |
 | AI-030 | Define the AI provider interface | AI daily briefs | Done |
-| AI-031 | Add deterministic test provider | AI daily briefs | Backlog |
+| AI-031 | Add deterministic test provider | AI daily briefs | Done |
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Backlog |
 | AI-033 | Generate a structured daily brief | AI daily briefs | Backlog |
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Backlog |
@@ -771,6 +818,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-08 — Added a deterministic fake AI provider with scripted and echoed completions, and a `create_provider` factory that selects the provider named by `OPSBRIEF_AI_PROVIDER`.
 - 2026-08-08 — Added the AI provider interface: a bounded completion request/response contract and an `AIProvider` protocol, used only to turn assembled material into prose and never to decide risks.
 - 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
 - 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
@@ -784,7 +832,6 @@ it is not picked up and left half-finished.
 - 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
 - 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
 - 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
-- 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
 
 ## Future Game Center Integration
 
