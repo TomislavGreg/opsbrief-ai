@@ -7,6 +7,7 @@ data, validated before use.
 """
 
 from opsbrief.ai.errors import AIProviderError
+from opsbrief.ai.factory import create_provider
 from opsbrief.ai.fake import FakeAIProvider
 from opsbrief.ai.provider import AIProvider
 from opsbrief.ai.schema import (
@@ -26,4 +27,5 @@ __all__ = [
     "CompletionRequest",
     "CompletionResponse",
     "FakeAIProvider",
+    "create_provider",
 ]
