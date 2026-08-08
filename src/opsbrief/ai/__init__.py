@@ -7,6 +7,7 @@ data, validated before use.
 """
 
 from opsbrief.ai.errors import AIProviderError
+from opsbrief.ai.fake import FakeAIProvider
 from opsbrief.ai.provider import AIProvider
 from opsbrief.ai.schema import (
     DEFAULT_MAX_OUTPUT_TOKENS,
@@ -24,4 +25,5 @@ __all__ = [
     "AIProviderError",
     "CompletionRequest",
     "CompletionResponse",
+    "FakeAIProvider",
 ]
