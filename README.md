@@ -72,6 +72,10 @@ produced it.
 - A `GET /risks` endpoint that runs every risk rule over the stored events and
   returns the current risks most urgent first, each naming the rule and source
   events behind it, with the reference instant the snapshot was judged against.
+- An AI provider interface: a bounded `CompletionRequest`/`CompletionResponse`
+  contract and an `AIProvider` protocol that turns already-assembled material into
+  prose, used only for phrasing and never for deciding risks, with its output
+  treated as untrusted data.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -84,6 +88,7 @@ description of working software.
 
 ```
 src/opsbrief/
+  ai/           AI provider interface and the completion contract
   api/          FastAPI routers, one module per resource
   events/       Operational event schema
   risks/        Deterministic risk contract and rule interface
@@ -605,6 +610,47 @@ prioritized risks. The reference instant is part of the answer, because a risk i
 judged against a moment in time, and every risk still cites the rule and the
 source events behind it. An example is shown under [API Examples](#api-examples).
 
+## AI Providers
+
+A language model has one job here: turning material the service has already
+assembled into prose. It never decides what counts as a risk, how urgent
+something is, or which events matter — those stay with the deterministic rules.
+The provider interface reflects that narrow role and keeps every model behind a
+single small seam, so the rest of the codebase depends on the contract rather
+than on any one model, and a deterministic fake can stand in for a real provider
+in tests.
+
+```python
+from opsbrief.ai import AIProvider, CompletionRequest, CompletionResponse
+
+request = CompletionRequest(
+    instructions="Summarise the operational picture in one line.",
+    input="Two integrations failed; one safety inspection is overdue.",
+)
+response: CompletionResponse = provider.complete(request)  # provider: AIProvider
+print(response.text, "—", response.model)
+```
+
+A `CompletionRequest` keeps the `instructions` (the task, phrased by the service)
+apart from the `input` (the material to work on), so a provider can treat the
+instruction as trusted framing and the input as data. The request is bounded on
+purpose: `max_output_tokens` caps how much a model may return, `temperature`
+defaults to zero because a stable phrasing is preferred over a varied one, and
+both text fields are length-limited so a prompt cannot grow without bound.
+
+A `CompletionResponse` carries the produced `text` and the `model` that produced
+it, so a generated statement traces to its model just as a risk traces to its
+rule. The text may be empty — an empty completion is a real outcome, not a
+contract violation — and it is untrusted: a caller validates and constrains it
+before use, exactly as it would any other external data.
+
+An `AIProvider` is a small protocol: a stable `name` and a single
+`complete(request)` method. A provider returns what the model produced and does
+not judge it; when it cannot produce a usable completion — a transport failure, a
+timeout, an unparseable reply — it raises `AIProviderError` rather than returning
+an empty or invented one. Concrete providers, starting with a deterministic fake
+for tests, implement this protocol in their own modules.
+
 ## Development Commands
 
 ```bash
@@ -679,7 +725,7 @@ started only once the API and core services are stable.
 | AI-023 | Detect repeated integration failures | Risk detection | Done |
 | AI-024 | Add risk priority scoring | Risk detection | Done |
 | AI-025 | Add risk-list API endpoint | Risk detection | Done |
-| AI-030 | Define the AI provider interface | AI daily briefs | Backlog |
+| AI-030 | Define the AI provider interface | AI daily briefs | Done |
 | AI-031 | Add deterministic test provider | AI daily briefs | Backlog |
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Backlog |
 | AI-033 | Generate a structured daily brief | AI daily briefs | Backlog |
@@ -725,6 +771,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-08 — Added the AI provider interface: a bounded completion request/response contract and an `AIProvider` protocol, used only to turn assembled material into prose and never to decide risks.
 - 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
 - 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
 - 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
@@ -738,7 +785,6 @@ it is not picked up and left half-finished.
 - 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
 - 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
 - 2026-07-29 — Added the `POST /events` ingestion endpoint, the ingestion service and the application-owned event store.
-- 2026-07-29 — Added SQLite event persistence: schema creation, an event store and its tests.
 
 ## Future Game Center Integration
 
