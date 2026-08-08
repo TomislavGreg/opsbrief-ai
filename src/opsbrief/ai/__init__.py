@@ -6,6 +6,8 @@ stays with the deterministic rules — and their output is treated as untrusted
 data, validated before use.
 """
 
+from opsbrief.ai.errors import AIProviderError
+from opsbrief.ai.provider import AIProvider
 from opsbrief.ai.schema import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     MAX_OUTPUT_TOKENS_LIMIT,
@@ -18,6 +20,8 @@ __all__ = [
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "MAX_OUTPUT_TOKENS_LIMIT",
     "MAX_PROMPT_LENGTH",
+    "AIProvider",
+    "AIProviderError",
     "CompletionRequest",
     "CompletionResponse",
 ]
