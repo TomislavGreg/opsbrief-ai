@@ -80,6 +80,11 @@ produced it.
   without calling a real model, and a `create_provider` factory that selects the
   provider named by `OPSBRIEF_AI_PROVIDER`, so tests and local runs are
   repeatable and offline.
+- A deterministic daily-brief context: the material a brief is built from,
+  assembled from the stored events without a model — the current risks in
+  priority order, a bounded view of the most recent events, notes on where the
+  picture is incomplete, and the source event IDs the whole picture traces back
+  to.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -94,6 +99,7 @@ description of working software.
 src/opsbrief/
   ai/           AI provider interface and the completion contract
   api/          FastAPI routers, one module per resource
+  brief/        Deterministic daily-brief context assembly
   events/       Operational event schema
   risks/        Deterministic risk contract and rule interface
   samples/      Synthetic operational-event fixtures and their loader
@@ -698,6 +704,50 @@ Only the fake provider is implemented so far; an unknown name is refused with a
 `ValueError` rather than silently ignored, so a misconfiguration fails loudly at
 wiring time instead of producing empty briefs later.
 
+## Daily Briefs
+
+A daily brief is phrased by a language model, but the material behind it is
+assembled first, deterministically, from the stored events. That assembled
+material is a `BriefContext`, and building it is a pure function of the events
+and the instant the brief is judged against — no model takes part, so the model
+is only ever asked to phrase a picture the service has already decided.
+
+```python
+from datetime import datetime, timezone
+
+from opsbrief.brief import build_brief_context
+
+now = datetime.now(timezone.utc)
+context = build_brief_context(events, now)  # events: stored Events
+
+context.risks  # current risks, most urgent first
+context.recent_events  # a bounded, newest-first view of recent activity
+context.notes  # where the picture is incomplete
+context.source_event_ids  # every event id the brief traces back to
+```
+
+The context gathers what a duty manager's brief needs to state. The current
+risks come from the canonical rule set, judged over the whole event history and
+ranked most urgent first, each still naming the rule and events behind it. The
+recent-events view is a bounded digest of the most recent events, newest
+occurred first, ties broken by event id so it is deterministic; it carries the
+fields a brief describes an event with but not the free-form `metadata`, which
+stays out of the context until a later phase governs what may be shown. `notes`
+records where the picture is incomplete — no events recorded, no risks found, or
+older events omitted because the view is bounded — so a brief can say so plainly
+rather than imply completeness. `source_event_ids` collects every distinct event
+the context draws on, risks before recent events, so the eventual brief traces
+back to real evidence exactly as a risk does.
+
+Risks are judged over the full history even though the recent-events view is
+capped, so an overdue task from last week still raises its risk while the view
+shows only today's activity. The cap keeps the context — and any prompt built
+from it — bounded no matter how much history the store holds; it defaults to the
+20 most recent events and is adjustable per call.
+
+Generating a brief from this context is a later ticket; this is the
+deterministic input it will be built on.
+
 ## Development Commands
 
 ```bash
@@ -774,7 +824,7 @@ started only once the API and core services are stable.
 | AI-025 | Add risk-list API endpoint | Risk detection | Done |
 | AI-030 | Define the AI provider interface | AI daily briefs | Done |
 | AI-031 | Add deterministic test provider | AI daily briefs | Done |
-| AI-032 | Build daily brief context from stored events | AI daily briefs | Backlog |
+| AI-032 | Build daily brief context from stored events | AI daily briefs | Done |
 | AI-033 | Generate a structured daily brief | AI daily briefs | Backlog |
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Backlog |
 | AI-035 | Add command-line brief generation | AI daily briefs | Backlog |
@@ -818,6 +868,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-09 — Added deterministic daily-brief context assembly: `build_brief_context` gathers the current risks, a bounded recent-events view, incompleteness notes and the source event IDs a brief traces back to, without a model.
 - 2026-08-08 — Added a deterministic fake AI provider with scripted and echoed completions, and a `create_provider` factory that selects the provider named by `OPSBRIEF_AI_PROVIDER`.
 - 2026-08-08 — Added the AI provider interface: a bounded completion request/response contract and an `AIProvider` protocol, used only to turn assembled material into prose and never to decide risks.
 - 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
@@ -831,7 +882,6 @@ it is not picked up and left half-finished.
 - 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
 - 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
 - 2026-07-31 — Added the `GET /events` listing endpoint with source, type, severity and status filters and `limit`/`offset` pagination.
-- 2026-07-30 — Added the `POST /events/batch` endpoint and an atomic bulk insert, storing a validated batch of events all-or-nothing.
 
 ## Future Game Center Integration
 
