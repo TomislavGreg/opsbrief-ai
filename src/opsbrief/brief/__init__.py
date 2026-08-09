@@ -7,6 +7,12 @@ pure function of the evidence, so the model is only ever asked to phrase a
 picture the service has already decided.
 """
 
+from opsbrief.brief.context import DEFAULT_RECENT_EVENTS, build_brief_context
 from opsbrief.brief.schema import BriefContext, EventDigest
 
-__all__ = ["BriefContext", "EventDigest"]
+__all__ = [
+    "DEFAULT_RECENT_EVENTS",
+    "BriefContext",
+    "EventDigest",
+    "build_brief_context",
+]
