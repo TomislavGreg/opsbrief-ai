@@ -8,11 +8,13 @@ picture the service has already decided.
 """
 
 from opsbrief.brief.context import DEFAULT_RECENT_EVENTS, build_brief_context
-from opsbrief.brief.schema import BriefContext, EventDigest
+from opsbrief.brief.schema import MAX_SUMMARY_LENGTH, BriefContext, DailyBrief, EventDigest
 
 __all__ = [
     "DEFAULT_RECENT_EVENTS",
+    "MAX_SUMMARY_LENGTH",
     "BriefContext",
+    "DailyBrief",
     "EventDigest",
     "build_brief_context",
 ]

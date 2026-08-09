@@ -21,6 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.risks import Risk
 
+#: Upper bound, in characters, on a brief's model-phrased summary. The summary is
+#: untrusted model output, so it is constrained to a bounded length before it is
+#: ever carried in a brief.
+MAX_SUMMARY_LENGTH = 1_000
+
 
 class EventDigest(BaseModel):
     """A stored event reduced to what a brief needs to describe and cite it.
@@ -123,3 +128,45 @@ class BriefContext(BaseModel):
                 seen.add(digest.id)
                 ordered.append(digest.id)
         return ordered
+
+
+class DailyBrief(BaseModel):
+    """A daily operations brief: the deterministic picture, phrased by a model.
+
+    The brief pairs a model-written ``summary`` with the structured facts behind
+    it. Only the summary comes from a language model, and it is treated as
+    untrusted: it is constrained to a bounded length and carries no authority to
+    invent a risk or an event. Everything a reader might act on — the prioritized
+    ``risks``, the ``notes`` on where the picture is incomplete, and the
+    ``source_event_ids`` every claim traces back to — is carried over unchanged
+    from the deterministic :class:`BriefContext`, so a model can rephrase the
+    picture but never change what it says. ``model`` names the model that
+    produced the summary, so a generated statement traces to its model just as a
+    risk traces to its rule.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    generated_at: datetime = Field(
+        description="The reference instant the brief was built for, in UTC.",
+    )
+    summary: str = Field(
+        max_length=MAX_SUMMARY_LENGTH,
+        description="The operational picture in prose, phrased by the model; may be empty.",
+    )
+    model: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Identifier of the model that produced the summary, for traceability.",
+    )
+    risks: list[Risk] = Field(
+        description="The current risks, most urgent first, carried over from the context.",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Where the picture is incomplete, carried over from the context.",
+    )
+    source_event_ids: list[str] = Field(
+        default_factory=list,
+        description="Every source event id the brief traces back to.",
+    )

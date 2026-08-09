@@ -1,0 +1,70 @@
+"""Tests for the daily-brief output contract."""
+
+from datetime import UTC, datetime
+
+import pytest
+from pydantic import ValidationError
+
+from opsbrief.brief import MAX_SUMMARY_LENGTH, DailyBrief
+from opsbrief.risks import Risk, RiskSeverity
+
+NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+
+
+def make_risk() -> Risk:
+    return Risk(
+        rule="overdue_work",
+        title="Safety inspection is overdue",
+        detail="Work was due earlier and is not resolved.",
+        severity=RiskSeverity.HIGH,
+        event_ids=["e04"],
+    )
+
+
+def test_daily_brief_carries_summary_and_structured_facts() -> None:
+    brief = DailyBrief(
+        generated_at=NOW,
+        summary="One safety inspection is overdue; act on it first.",
+        model="fake",
+        risks=[make_risk()],
+        notes=["Showing the 5 most recent of 12 events."],
+        source_event_ids=["e04"],
+    )
+
+    assert brief.model == "fake"
+    assert brief.risks[0].rule == "overdue_work"
+    assert brief.source_event_ids == ["e04"]
+
+
+def test_summary_may_be_empty() -> None:
+    brief = DailyBrief(generated_at=NOW, summary="", model="fake", risks=[])
+
+    assert brief.summary == ""
+    assert brief.notes == []
+    assert brief.source_event_ids == []
+
+
+def test_summary_is_length_bounded() -> None:
+    with pytest.raises(ValidationError):
+        DailyBrief(
+            generated_at=NOW,
+            summary="x" * (MAX_SUMMARY_LENGTH + 1),
+            model="fake",
+            risks=[],
+        )
+
+
+def test_model_is_required_for_traceability() -> None:
+    with pytest.raises(ValidationError):
+        DailyBrief(generated_at=NOW, summary="ok", model="", risks=[])
+
+
+def test_daily_brief_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        DailyBrief(
+            generated_at=NOW,
+            summary="ok",
+            model="fake",
+            risks=[],
+            recommendations=["invent something"],
+        )
