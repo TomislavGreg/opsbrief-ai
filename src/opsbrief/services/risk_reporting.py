@@ -9,30 +9,10 @@ of the events and the instant.
 
 from datetime import datetime
 
-from opsbrief.events import Event, as_utc
+from opsbrief.events import as_utc
 from opsbrief.risks import RiskList, default_rules, detect_risks, prioritize
+from opsbrief.services.history import read_all_events
 from opsbrief.storage import EventStore
-
-#: How many events to read per page while gathering the whole history.
-_PAGE = 500
-
-
-def _all_events(store: EventStore) -> list[Event]:
-    """Return every stored event, so a rule judges against the full history.
-
-    Events are read a page at a time and gathered, rather than capped at one
-    page, because a risk depends on all the evidence: an overdue task from last
-    week still matters. The store's ordering is stable, so paging walks the whole
-    history without gaps or repeats.
-    """
-    events: list[Event] = []
-    offset = 0
-    while True:
-        page = store.list_events(limit=_PAGE, offset=offset)
-        events.extend(page)
-        if len(page) < _PAGE:
-            return events
-        offset += _PAGE
 
 
 def list_risks(store: EventStore, now: datetime) -> RiskList:
@@ -44,5 +24,5 @@ def list_risks(store: EventStore, now: datetime) -> RiskList:
     still cites the rule and events behind it.
     """
     reference = as_utc(now)
-    risks = detect_risks(_all_events(store), default_rules(reference))
+    risks = detect_risks(read_all_events(store), default_rules(reference))
     return RiskList(generated_at=reference, risks=prioritize(risks))
