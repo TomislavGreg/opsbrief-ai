@@ -89,6 +89,10 @@ produced it.
   `DailyBrief` whose prose summary is phrased by the configured provider and
   whose risks, notes and source event IDs are carried over from the deterministic
   context, with the model's output constrained as untrusted data.
+- A `GET /brief` endpoint that assembles the deterministic brief context over the
+  whole stored event history and returns the current daily brief: a model-phrased
+  summary alongside the prioritized risks, incompleteness notes and source event
+  IDs the picture traces back to.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -392,6 +396,54 @@ Risks are ordered by priority — severity first, then evidence, as described un
 [Risk Detection](#risk-detection) — so the first risk is the one to act on first.
 `total` counts the risks, and `generated_at` records when the snapshot was taken,
 because a risk is judged against a moment in time.
+
+Generate the current daily operations brief:
+
+```bash
+curl http://127.0.0.1:8000/brief
+```
+
+The service answers `200 OK` with a brief for the moment of the request: a
+model-phrased `summary` alongside the deterministic picture behind it — the
+prioritized `risks`, the `notes` on where the picture is incomplete, and the
+`source_event_ids` every claim traces back to:
+
+```json
+{
+  "generated_at": "2026-07-29T18:00:00Z",
+  "summary": "One integration keeps failing and a safety inspection is overdue; deal with the ticketing failures first.",
+  "model": "fake-1",
+  "risks": [
+    {
+      "rule": "repeated_integration_failure",
+      "title": "Integration ticketing has failed 5 times",
+      "detail": "Integration \"ticketing\" (source: integrations) has failed 5 times ...",
+      "severity": "critical",
+      "event_ids": ["e17", "e18", "e19", "e20", "e21"]
+    },
+    {
+      "rule": "overdue_work",
+      "title": "Safety inspection for North Stand is overdue",
+      "detail": "Work \"Safety inspection for North Stand\" was due at ...",
+      "severity": "high",
+      "event_ids": ["e04"]
+    }
+  ],
+  "notes": [],
+  "source_event_ids": ["e17", "e18", "e19", "e20", "e21", "e04"]
+}
+```
+
+The endpoint takes no parameters: it always reports the whole current picture.
+Only the `summary` comes from a language model, and it is treated as untrusted —
+collapsed to a single line and truncated to a bounded length — so injected
+formatting or unbounded text cannot shape the brief. Everything a reader acts on
+is carried from the deterministic context, as described under
+[Daily Briefs](#daily-briefs). The active model is chosen by
+`OPSBRIEF_AI_PROVIDER`; the default build phrases with the deterministic fake
+provider, which reports itself as `fake-1`. When the model returns no usable
+summary the brief is still produced from the deterministic picture, with a note
+recording the gap.
 
 Further endpoints are documented here as they are built.
 
@@ -779,8 +831,11 @@ model just as a risk traces to its rule. When the model returns no usable
 summary, the brief is still produced from the deterministic picture and a note
 records the gap.
 
-Exposing this over an API and a command line is a later ticket; this is the
-generation step behind both.
+The `GET /brief` endpoint surfaces exactly this over HTTP: it assembles the
+context over the whole stored event history at the moment of the request, phrases
+it with the configured provider and returns the resulting `DailyBrief`. An
+example is shown under [API Examples](#api-examples). Exposing the same
+generation step over a command line is a later ticket.
 
 ## Development Commands
 
@@ -860,7 +915,7 @@ started only once the API and core services are stable.
 | AI-031 | Add deterministic test provider | AI daily briefs | Done |
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Done |
 | AI-033 | Generate a structured daily brief | AI daily briefs | Done |
-| AI-034 | Add daily brief API endpoint | AI daily briefs | Backlog |
+| AI-034 | Add daily brief API endpoint | AI daily briefs | Done |
 | AI-035 | Add command-line brief generation | AI daily briefs | Backlog |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Backlog |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Backlog |
@@ -902,6 +957,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
 - 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
 - 2026-08-09 — Added deterministic daily-brief context assembly: `build_brief_context` gathers the current risks, a bounded recent-events view, incompleteness notes and the source event IDs a brief traces back to, without a model.
 - 2026-08-08 — Added a deterministic fake AI provider with scripted and echoed completions, and a `create_provider` factory that selects the provider named by `OPSBRIEF_AI_PROVIDER`.
@@ -915,7 +971,6 @@ it is not picked up and left half-finished.
 - 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
 - 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
 - 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
-- 2026-08-01 — Added the `GET /events/{event_id}` endpoint, returning a single stored event or 404 when the identifier is unknown.
 
 ## Future Game Center Integration
 
