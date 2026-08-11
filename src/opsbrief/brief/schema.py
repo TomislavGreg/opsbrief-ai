@@ -26,6 +26,13 @@ from opsbrief.risks import Risk
 #: ever carried in a brief.
 MAX_SUMMARY_LENGTH = 1_000
 
+#: Version of the daily-brief output structure. Every brief records the version of
+#: the shape it was produced in, so a consumer can tell one structure from a later
+#: one and a stored brief stays interpretable after the shape changes. Bump this
+#: whenever the fields of :class:`DailyBrief` change in a way a consumer would
+#: need to notice.
+BRIEF_OUTPUT_VERSION = "daily-brief/1"
+
 
 class EventDigest(BaseModel):
     """A stored event reduced to what a brief needs to describe and cite it.
@@ -142,7 +149,9 @@ class DailyBrief(BaseModel):
     from the deterministic :class:`BriefContext`, so a model can rephrase the
     picture but never change what it says. ``model`` names the model that
     produced the summary, so a generated statement traces to its model just as a
-    risk traces to its rule.
+    risk traces to its rule, and ``output_version`` names the shape the brief was
+    produced in, so a stored or piped brief stays interpretable after the
+    structure changes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -158,6 +167,12 @@ class DailyBrief(BaseModel):
         min_length=1,
         max_length=128,
         description="Identifier of the model that produced the summary, for traceability.",
+    )
+    output_version: str = Field(
+        default=BRIEF_OUTPUT_VERSION,
+        min_length=1,
+        max_length=64,
+        description="Version of the brief's output structure, so consumers can detect changes.",
     )
     risks: list[Risk] = Field(
         description="The current risks, most urgent first, carried over from the context.",
