@@ -5,7 +5,13 @@ from datetime import UTC, datetime
 import pytest
 
 from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse, FakeAIProvider
-from opsbrief.brief import MAX_SUMMARY_LENGTH, BriefContext, EventDigest
+from opsbrief.brief import (
+    BRIEF_OUTPUT_VERSION,
+    BRIEF_PROMPT_VERSION,
+    MAX_SUMMARY_LENGTH,
+    BriefContext,
+    EventDigest,
+)
 from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render_context
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.risks import Risk, RiskSeverity
@@ -65,6 +71,25 @@ def test_structured_facts_are_carried_from_the_context_not_the_model() -> None:
     assert brief.risks == context.risks
     assert brief.source_event_ids == context.source_event_ids == ["e04"]
     assert brief.notes == ["Showing the 1 most recent of 9 events."]
+
+
+def test_generated_brief_records_the_prompt_and_output_versions() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+
+    brief = generate_brief(make_context(), provider)
+
+    assert brief.prompt_version == BRIEF_PROMPT_VERSION
+    assert brief.output_version == BRIEF_OUTPUT_VERSION
+
+
+def test_versions_are_recorded_even_when_the_summary_is_missing() -> None:
+    provider = FakeAIProvider(responses=["   "])
+
+    brief = generate_brief(make_context(), provider)
+
+    assert brief.summary == ""
+    assert brief.prompt_version == BRIEF_PROMPT_VERSION
+    assert brief.output_version == BRIEF_OUTPUT_VERSION
 
 
 def test_summary_is_collapsed_to_one_line() -> None:

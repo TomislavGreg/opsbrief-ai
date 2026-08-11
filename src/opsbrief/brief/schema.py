@@ -33,6 +33,13 @@ MAX_SUMMARY_LENGTH = 1_000
 #: need to notice.
 BRIEF_OUTPUT_VERSION = "daily-brief/1"
 
+#: Version of the prompt a brief's summary was produced with — the instructions
+#: and the context rendering in :mod:`opsbrief.brief.generate`. Every generated
+#: brief records it, so a summary traces to the exact prompt behind it and a
+#: change in phrasing is visible rather than silent. Bump this whenever those
+#: instructions or that rendering change.
+BRIEF_PROMPT_VERSION = "brief-prompt/1"
+
 
 class EventDigest(BaseModel):
     """A stored event reduced to what a brief needs to describe and cite it.
@@ -149,9 +156,10 @@ class DailyBrief(BaseModel):
     from the deterministic :class:`BriefContext`, so a model can rephrase the
     picture but never change what it says. ``model`` names the model that
     produced the summary, so a generated statement traces to its model just as a
-    risk traces to its rule, and ``output_version`` names the shape the brief was
-    produced in, so a stored or piped brief stays interpretable after the
-    structure changes.
+    risk traces to its rule. ``output_version`` names the shape the brief was
+    produced in, and ``prompt_version`` names the prompt that phrased its summary,
+    so a stored or piped brief stays interpretable — and a change in structure or
+    phrasing stays visible — after either changes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -173,6 +181,12 @@ class DailyBrief(BaseModel):
         min_length=1,
         max_length=64,
         description="Version of the brief's output structure, so consumers can detect changes.",
+    )
+    prompt_version: str = Field(
+        default=BRIEF_PROMPT_VERSION,
+        min_length=1,
+        max_length=64,
+        description="Version of the prompt that produced the summary, so it traces to its prompt.",
     )
     risks: list[Risk] = Field(
         description="The current risks, most urgent first, carried over from the context.",

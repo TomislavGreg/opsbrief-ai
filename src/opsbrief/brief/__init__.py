@@ -11,6 +11,7 @@ from opsbrief.brief.context import DEFAULT_RECENT_EVENTS, build_brief_context
 from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render_context
 from opsbrief.brief.schema import (
     BRIEF_OUTPUT_VERSION,
+    BRIEF_PROMPT_VERSION,
     MAX_SUMMARY_LENGTH,
     BriefContext,
     DailyBrief,
@@ -19,6 +20,7 @@ from opsbrief.brief.schema import (
 
 __all__ = [
     "BRIEF_OUTPUT_VERSION",
+    "BRIEF_PROMPT_VERSION",
     "DEFAULT_INSTRUCTIONS",
     "DEFAULT_RECENT_EVENTS",
     "MAX_SUMMARY_LENGTH",
