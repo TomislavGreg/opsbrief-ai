@@ -18,11 +18,20 @@ from collections.abc import Sequence
 
 from opsbrief.ai import AIProvider, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
-from opsbrief.brief.schema import MAX_SUMMARY_LENGTH, BriefContext, DailyBrief, EventDigest
+from opsbrief.brief.schema import (
+    BRIEF_OUTPUT_VERSION,
+    BRIEF_PROMPT_VERSION,
+    MAX_SUMMARY_LENGTH,
+    BriefContext,
+    DailyBrief,
+    EventDigest,
+)
 from opsbrief.risks import Risk
 
 #: The task the model performs, phrased by the service. It asks only for prose:
-#: the model summarises the picture and never decides what it contains.
+#: the model summarises the picture and never decides what it contains. Changing
+#: this text, or the context rendering below, is a change of prompt: bump
+#: :data:`~opsbrief.brief.schema.BRIEF_PROMPT_VERSION` when it happens.
 DEFAULT_INSTRUCTIONS = (
     "You are writing a daily operations brief for a duty manager. Using only the "
     "operational picture provided, write a short, plain summary of the current "
@@ -108,7 +117,10 @@ def generate_brief(
     structured facts — the risks, the notes and the source event IDs — are taken
     from ``context`` unchanged, so the model rephrases the picture but never
     changes what it says. When the model returns no usable summary, the brief is
-    still produced from the deterministic picture and a note records the gap.
+    still produced from the deterministic picture and a note records the gap. The
+    brief records the prompt and output versions it was produced with, so a
+    summary traces to the exact prompt behind it and a consumer can detect a
+    change in either.
     """
     request = CompletionRequest(
         instructions=instructions,
@@ -128,6 +140,8 @@ def generate_brief(
         generated_at=context.generated_at,
         summary=summary,
         model=response.model,
+        output_version=BRIEF_OUTPUT_VERSION,
+        prompt_version=BRIEF_PROMPT_VERSION,
         risks=context.risks,
         notes=notes,
         source_event_ids=context.source_event_ids,
