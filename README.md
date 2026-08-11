@@ -93,6 +93,9 @@ produced it.
   whole stored event history and returns the current daily brief: a model-phrased
   summary alongside the prioritized risks, incompleteness notes and source event
   IDs the picture traces back to.
+- An `opsbrief` command-line entry point that generates the current daily brief
+  over the configured event store and prints it as a readable text block or as
+  the brief's exact JSON, so a brief can be produced without running the server.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -113,6 +116,7 @@ src/opsbrief/
   samples/      Synthetic operational-event fixtures and their loader
   services/     Logic behind the routers
   storage/      SQLite connection handling and the event store
+  cli.py        Command-line daily-brief generation
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
 tests/          Pytest suite mirroring the package layout
@@ -834,8 +838,23 @@ records the gap.
 The `GET /brief` endpoint surfaces exactly this over HTTP: it assembles the
 context over the whole stored event history at the moment of the request, phrases
 it with the configured provider and returns the resulting `DailyBrief`. An
-example is shown under [API Examples](#api-examples). Exposing the same
-generation step over a command line is a later ticket.
+example is shown under [API Examples](#api-examples).
+
+The same generation step is available on the command line, so a brief can be
+produced without running the server:
+
+```bash
+opsbrief             # a readable text brief over the configured event store
+opsbrief --format json   # the brief's exact JSON, the same shape GET /brief returns
+```
+
+The `opsbrief` command opens the event store named by `OPSBRIEF_DATABASE_URL`,
+assembles the deterministic context over the whole history at the moment of the
+run and phrases it with the provider named by `OPSBRIEF_AI_PROVIDER` — the same
+store and provider the API uses. Text is laid out for a reader; `--format json`
+emits the `DailyBrief` verbatim, so the two never disagree. An empty store still
+produces a brief that plainly says there is nothing to report, rather than an
+error.
 
 ## Development Commands
 
@@ -846,6 +865,8 @@ ruff check .                         # Lint
 ruff check . --fix                   # Lint and autofix
 ruff format .                        # Format
 uvicorn opsbrief.main:app --reload   # Run the API locally
+opsbrief                             # Print the current daily brief
+opsbrief --format json               # Print it as JSON
 ```
 
 ```bash
@@ -916,7 +937,7 @@ started only once the API and core services are stable.
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Done |
 | AI-033 | Generate a structured daily brief | AI daily briefs | Done |
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Done |
-| AI-035 | Add command-line brief generation | AI daily briefs | Backlog |
+| AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Backlog |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Backlog |
 | AI-041 | Link operational events to incidents | Incident intelligence | Backlog |
@@ -957,6 +978,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
 - 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
 - 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
 - 2026-08-09 — Added deterministic daily-brief context assembly: `build_brief_context` gathers the current risks, a bounded recent-events view, incompleteness notes and the source event IDs a brief traces back to, without a model.
@@ -970,7 +992,6 @@ it is not picked up and left half-finished.
 - 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
 - 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
 - 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
-- 2026-08-02 — Added duplicate-event protection: a resubmission carrying a known `external_id` from the same source returns the originally stored event instead of storing it again.
 
 ## Future Game Center Integration
 
