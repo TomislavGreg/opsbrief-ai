@@ -9,9 +9,16 @@ picture the service has already decided.
 
 from opsbrief.brief.context import DEFAULT_RECENT_EVENTS, build_brief_context
 from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render_context
-from opsbrief.brief.schema import MAX_SUMMARY_LENGTH, BriefContext, DailyBrief, EventDigest
+from opsbrief.brief.schema import (
+    BRIEF_OUTPUT_VERSION,
+    MAX_SUMMARY_LENGTH,
+    BriefContext,
+    DailyBrief,
+    EventDigest,
+)
 
 __all__ = [
+    "BRIEF_OUTPUT_VERSION",
     "DEFAULT_INSTRUCTIONS",
     "DEFAULT_RECENT_EVENTS",
     "MAX_SUMMARY_LENGTH",
