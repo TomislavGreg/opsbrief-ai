@@ -96,6 +96,11 @@ produced it.
 - An `opsbrief` command-line entry point that generates the current daily brief
   over the configured event store and prints it as a readable text block or as
   the brief's exact JSON, so a brief can be produced without running the server.
+- Prompt and output version tracking on every generated brief: a `prompt_version`
+  for the instructions and context rendering behind the summary and an
+  `output_version` for the `DailyBrief` structure, stamped at generation so a
+  brief traces to the exact prompt behind it and a consumer can detect a change
+  in either.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -417,6 +422,8 @@ prioritized `risks`, the `notes` on where the picture is incomplete, and the
   "generated_at": "2026-07-29T18:00:00Z",
   "summary": "One integration keeps failing and a safety inspection is overdue; deal with the ticketing failures first.",
   "model": "fake-1",
+  "output_version": "daily-brief/1",
+  "prompt_version": "brief-prompt/1",
   "risks": [
     {
       "rule": "repeated_integration_failure",
@@ -447,7 +454,9 @@ is carried from the deterministic context, as described under
 `OPSBRIEF_AI_PROVIDER`; the default build phrases with the deterministic fake
 provider, which reports itself as `fake-1`. When the model returns no usable
 summary the brief is still produced from the deterministic picture, with a note
-recording the gap.
+recording the gap. `output_version` names the shape the brief was produced in and
+`prompt_version` the prompt that phrased its summary, so a stored or piped brief
+stays interpretable and a change in either stays visible.
 
 Further endpoints are documented here as they are built.
 
@@ -818,6 +827,8 @@ brief = generate_brief(context, create_provider())
 
 brief.summary  # the picture in prose, phrased by the model
 brief.model  # which model phrased it, for traceability
+brief.output_version  # the shape the brief was produced in
+brief.prompt_version  # the prompt that phrased the summary
 brief.risks  # the current risks, carried over from the context
 brief.notes  # where the picture is incomplete
 brief.source_event_ids  # every event id the brief traces back to
@@ -831,9 +842,15 @@ prioritized `risks`, the `notes`, and the `source_event_ids` every claim traces
 back to — is carried straight from the deterministic context, so the model can
 rephrase the picture but never change what it says or invent an event. `model`
 records which model produced the summary, so a generated statement traces to its
-model just as a risk traces to its rule. When the model returns no usable
-summary, the brief is still produced from the deterministic picture and a note
-records the gap.
+model just as a risk traces to its rule. Alongside it, every brief records the
+version of the prompt that phrased its summary and the version of the output
+structure it was produced in: `prompt_version` covers the instructions and the
+context rendering, and `output_version` covers the `DailyBrief` shape. Both are
+stamped by `generate_brief` from `BRIEF_PROMPT_VERSION` and `BRIEF_OUTPUT_VERSION`,
+which are bumped when the prompt or the structure changes, so a change in phrasing
+or shape is visible in the brief rather than silent. When the model returns no
+usable summary, the brief is still produced from the deterministic picture — with
+both versions still recorded — and a note records the gap.
 
 The `GET /brief` endpoint surfaces exactly this over HTTP: it assembles the
 context over the whole stored event history at the moment of the request, phrases
@@ -938,7 +955,7 @@ started only once the API and core services are stable.
 | AI-033 | Generate a structured daily brief | AI daily briefs | Done |
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Done |
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
-| AI-036 | Add prompt and output version tracking | AI daily briefs | Backlog |
+| AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Backlog |
 | AI-041 | Link operational events to incidents | Incident intelligence | Backlog |
 | AI-042 | Generate incident timelines | Incident intelligence | Backlog |
@@ -978,6 +995,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
 - 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
 - 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
 - 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
@@ -991,7 +1009,6 @@ it is not picked up and left half-finished.
 - 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
 - 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
 - 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
-- 2026-08-03 — Extended resubmission recognition to `POST /events/batch`: a batch resubmitting a known `external_id`, or repeating one within itself, returns the stored event instead of creating a duplicate, and reports how many events were newly stored.
 
 ## Future Game Center Integration
 
