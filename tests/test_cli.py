@@ -1,11 +1,17 @@
-"""Tests for the command-line brief rendering."""
+"""Tests for the command-line brief rendering and generation."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
 
 from opsbrief.brief import DailyBrief
-from opsbrief.cli import render_json, render_text
+from opsbrief.cli import build_parser, render_json, render_text, run
+from opsbrief.config import get_settings
+from opsbrief.events import Event, EventInput
 from opsbrief.risks import Risk, RiskSeverity
+from opsbrief.storage import EventStore
 
 
 def make_brief(**overrides: object) -> DailyBrief:
@@ -68,3 +74,75 @@ def test_json_is_the_briefs_exact_serialisation() -> None:
     assert parsed["model"] == "fake-1"
     assert parsed["source_event_ids"] == ["e17", "e18", "e19"]
     assert parsed["risks"][0]["rule"] == "repeated_integration_failure"
+
+
+@pytest.fixture
+def database_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Point the settings at a throwaway file database the CLI will open."""
+    url = f"sqlite:///{tmp_path / 'cli.db'}"
+    monkeypatch.setenv("OPSBRIEF_DATABASE_URL", url)
+    get_settings.cache_clear()
+    try:
+        yield url
+    finally:
+        get_settings.cache_clear()
+
+
+def store_overdue_event(url: str) -> str:
+    """Store one overdue event in the CLI's database and return its identifier."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    payload = {
+        "source": "tasks",
+        "event_type": "task.update",
+        "subject": "Safety inspection for North Stand",
+        "occurred_at": (now - timedelta(hours=6)).isoformat(),
+        "due_at": (now - timedelta(hours=2)).isoformat(),
+    }
+    event = Event.from_input(EventInput(**payload))
+    with EventStore.open(url) as store:
+        store.add(event)
+    return event.id
+
+
+def test_default_format_is_a_text_brief_over_the_stored_events(
+    database_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_id = store_overdue_event(database_url)
+
+    exit_code = run([])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Daily operations brief" in out
+    assert "overdue_work" in out
+    assert event_id in out
+
+
+def test_json_format_emits_the_briefs_serialisation(
+    database_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_id = store_overdue_event(database_url)
+
+    exit_code = run(["--format", "json"])
+
+    assert exit_code == 0
+    parsed = json.loads(capsys.readouterr().out)
+    assert parsed["risks"][0]["rule"] == "overdue_work"
+    assert event_id in parsed["source_event_ids"]
+    assert parsed["model"] == "fake-1"
+
+
+def test_empty_store_still_produces_a_brief_that_says_so(
+    database_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = run([])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Risks (most urgent first): none." in out
+    assert "Source events: none." in out
+
+
+def test_an_unknown_format_is_rejected() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--format", "yaml"])

@@ -20,6 +20,9 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.scripts]
+opsbrief = "opsbrief.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/TomislavGreg/opsbrief-ai"
 
