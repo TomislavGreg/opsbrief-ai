@@ -48,6 +48,12 @@ def test_text_shows_the_summary_model_and_risks() -> None:
     assert "Source events: e17, e18, e19" in text
 
 
+def test_text_records_the_prompt_and_output_versions() -> None:
+    text = render_text(make_brief())
+
+    assert "Prompt version brief-prompt/1; output version daily-brief/1" in text
+
+
 def test_text_marks_empty_sections_rather_than_dropping_them() -> None:
     text = render_text(make_brief(risks=[], notes=[], source_event_ids=[], summary=""))
 
