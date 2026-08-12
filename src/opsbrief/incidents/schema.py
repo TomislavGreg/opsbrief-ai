@@ -29,6 +29,21 @@ from opsbrief.incidents.lifecycle import (
 )
 
 
+class IncidentClosedError(ValueError):
+    """Raised when an operation would change a closed incident.
+
+    ``closed`` is terminal: a signed-off incident is a finished record, so its
+    evidence is frozen and events can be neither linked nor unlinked. It is a
+    ``ValueError`` so a caller can treat it as ordinary invalid input, and it
+    carries the incident's id and the attempted action so the reason is clear.
+    """
+
+    def __init__(self, incident_id: str, action: str) -> None:
+        self.incident_id = incident_id
+        self.action = action
+        super().__init__(f"cannot {action} a closed incident ({incident_id!r})")
+
+
 class IncidentSeverity(StrEnum):
     """How serious an incident is.
 
@@ -197,3 +212,41 @@ class Incident(BaseModel):
         return self.model_copy(
             update={"status": target, "updated_at": moment, "resolved_at": resolved_at}
         )
+
+    def link_events(self, event_ids: list[str], *, at: datetime | None = None) -> "Incident":
+        """Return a copy of the incident with ``event_ids`` attributed to it.
+
+        New identifiers are appended after the ones already linked, in the order
+        given; an identifier already linked is left where it is, so linking is
+        idempotent and never reorders or duplicates the evidence. ``updated_at``
+        advances to ``at``. A closed incident is frozen, so linking to one raises
+        :class:`IncidentClosedError` and nothing changes.
+        """
+        if self.is_terminal:
+            raise IncidentClosedError(self.id, "link events to")
+        merged = list(self.event_ids)
+        for event_id in event_ids:
+            if not event_id.strip():
+                raise ValueError("event_ids must not contain a blank identifier")
+            if event_id not in merged:
+                merged.append(event_id)
+        moment = at or datetime.now(UTC)
+        return self.model_copy(update={"event_ids": merged, "updated_at": moment})
+
+    def unlink_events(self, event_ids: list[str], *, at: datetime | None = None) -> "Incident":
+        """Return a copy of the incident with ``event_ids`` no longer attributed.
+
+        Identifiers not currently linked are ignored, so unlinking is idempotent.
+        An incident must always cite at least one source event, so an unlink that
+        would remove the last of them raises ``ValueError`` and nothing changes;
+        a closed incident is frozen, so unlinking from one raises
+        :class:`IncidentClosedError`. ``updated_at`` advances to ``at``.
+        """
+        if self.is_terminal:
+            raise IncidentClosedError(self.id, "unlink events from")
+        removing = set(event_ids)
+        remaining = [event_id for event_id in self.event_ids if event_id not in removing]
+        if not remaining:
+            raise ValueError("an incident must keep at least one source event")
+        moment = at or datetime.now(UTC)
+        return self.model_copy(update={"event_ids": remaining, "updated_at": moment})
