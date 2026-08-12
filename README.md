@@ -101,6 +101,11 @@ produced it.
   `output_version` for the `DailyBrief` structure, stamped at generation so a
   brief traces to the exact prompt behind it and a consumer can detect a change
   in either.
+- An incident model with a deterministic status lifecycle: an `Incident` groups
+  the source events behind one disruption and moves through `open`,
+  `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions
+  only, recording when it opened, last changed and stopped being active, with a
+  disallowed move refused rather than silently applied.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -117,6 +122,7 @@ src/opsbrief/
   api/          FastAPI routers, one module per resource
   brief/        Daily-brief context assembly and generation
   events/       Operational event schema
+  incidents/    Incident model and its status lifecycle
   risks/        Deterministic risk contract and rule interface
   samples/      Synthetic operational-event fixtures and their loader
   services/     Logic behind the routers
@@ -873,6 +879,53 @@ emits the `DailyBrief` verbatim, so the two never disagree. An empty store still
 produces a brief that plainly says there is nothing to report, rather than an
 error.
 
+## Incidents
+
+A risk is recomputed from the current events every time it is asked for; an
+incident is different. It is a stateful record of one disruption — a stretch of
+related events worth tracking as a single thing — that is declared once and
+moves through a lifecycle as the situation develops. The model and its lifecycle
+are deterministic and hold no model involvement: a language model may later
+phrase an incident summary, but it never declares an incident or moves it.
+
+```python
+from datetime import datetime, timezone
+
+from opsbrief.incidents import Incident, IncidentSeverity, IncidentStatus
+
+now = datetime.now(timezone.utc)
+incident = Incident.declare(
+    title="Ticketing integration failing repeatedly",
+    severity=IncidentSeverity.HIGH,
+    event_ids=["e17", "e18", "e19"],  # the events that triggered it
+    at=now,
+)
+
+incident.status  # IncidentStatus.OPEN
+working = incident.transition_to(IncidentStatus.INVESTIGATING, at=now)
+resolved = working.transition_to(IncidentStatus.RESOLVED, at=now)
+resolved.resolved_at  # the instant it stopped being active
+resolved.is_active  # False
+```
+
+An incident carries the source `event_ids` behind it, distinct and non-blank, so
+it traces back to real evidence exactly as a risk does. It records three instants:
+`opened_at`, fixed when the incident is declared; `updated_at`, which advances on
+every change; and `resolved_at`, set the moment the incident stops being active
+and cleared again if it is reopened, so the resolution instant never disagrees
+with the state.
+
+The lifecycle has five states. An incident is *active* while it is still being
+worked — `open` (declared, unclaimed), `investigating` (actively worked) and
+`monitoring` (mitigated, watched for recurrence) — and *inactive* once it has
+stopped — `resolved` (believed fixed) and `closed` (signed off, terminal).
+`transition_to` moves an incident only along an allowed edge: a resolved incident
+may reopen for investigation if it recurs or be closed once signed off, but a
+closed incident moves nowhere, and any disallowed move raises
+`InvalidIncidentTransition` rather than being silently applied. Each move returns
+a new incident, leaving the original untouched, so a caller can compare before
+and after.
+
 ## Development Commands
 
 ```bash
@@ -956,7 +1009,7 @@ started only once the API and core services are stable.
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Done |
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
-| AI-040 | Add incident model and status lifecycle | Incident intelligence | In Progress |
+| AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Backlog |
 | AI-042 | Generate incident timelines | Incident intelligence | Backlog |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Backlog |
@@ -995,6 +1048,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
 - 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
 - 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
 - 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
@@ -1008,7 +1062,6 @@ it is not picked up and left half-finished.
 - 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
 - 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
 - 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
-- 2026-08-04 — Added synthetic operational-event fixtures and a loader that validates them against the event contract, giving demos and later phases realistic sample data.
 
 ## Future Game Center Integration
 
