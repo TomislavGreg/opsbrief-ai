@@ -101,6 +101,11 @@ produced it.
   `output_version` for the `DailyBrief` structure, stamped at generation so a
   brief traces to the exact prompt behind it and a consumer can detect a change
   in either.
+- Graceful degradation when the AI provider fails: because the model only phrases
+  a picture the service has already decided, a provider outage does not fail the
+  brief or the `/brief` endpoint. The deterministic picture is still returned, the
+  summary is left empty, a note records the outage, and the provider that was asked
+  is recorded as the brief's model.
 - An incident model with a deterministic status lifecycle: an `Incident` groups
   the source events behind one disruption and moves through `open`,
   `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions
@@ -463,9 +468,11 @@ formatting or unbounded text cannot shape the brief. Everything a reader acts on
 is carried from the deterministic context, as described under
 [Daily Briefs](#daily-briefs). The active model is chosen by
 `OPSBRIEF_AI_PROVIDER`; the default build phrases with the deterministic fake
-provider, which reports itself as `fake-1`. When the model returns no usable
-summary the brief is still produced from the deterministic picture, with a note
-recording the gap. `output_version` names the shape the brief was produced in and
+provider, which reports itself as `fake-1`. The model is only a phrasing layer,
+so it never fails the brief: when it returns no usable summary, or when the
+provider is unavailable, the endpoint still answers with the deterministic
+picture and a note recording which gap occurred, rather than an error.
+`output_version` names the shape the brief was produced in and
 `prompt_version` the prompt that phrased its summary, so a stored or piped brief
 stays interpretable and a change in either stays visible.
 
@@ -859,9 +866,14 @@ structure it was produced in: `prompt_version` covers the instructions and the
 context rendering, and `output_version` covers the `DailyBrief` shape. Both are
 stamped by `generate_brief` from `BRIEF_PROMPT_VERSION` and `BRIEF_OUTPUT_VERSION`,
 which are bumped when the prompt or the structure changes, so a change in phrasing
-or shape is visible in the brief rather than silent. When the model returns no
-usable summary, the brief is still produced from the deterministic picture — with
-both versions still recorded — and a note records the gap.
+or shape is visible in the brief rather than silent. The model is a phrasing
+layer, not the product, so it is never allowed to fail the brief. When it returns
+no usable summary, or when the provider cannot produce one at all (a transport
+error, a timeout, an unparseable reply), the brief is still produced from the
+deterministic picture — with both versions still recorded — and a note records
+which gap occurred. On a provider outage the brief records the provider that was
+asked as its `model`, so even a degraded brief traces to where its summary should
+have come from.
 
 The `GET /brief` endpoint surfaces exactly this over HTTP: it assembles the
 context over the whole stored event history at the moment of the request, phrases
@@ -1051,6 +1063,7 @@ started only once the API and core services are stable.
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Done |
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
+| AI-037 | Degrade the daily brief when the provider fails | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Backlog |
@@ -1090,6 +1103,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
 - 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
 - 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
 - 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
@@ -1103,7 +1117,6 @@ it is not picked up and left half-finished.
 - 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
 - 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
 - 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
-- 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
 
 ## Future Game Center Integration
 
