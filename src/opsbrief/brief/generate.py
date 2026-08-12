@@ -16,7 +16,7 @@ part of a brief, exactly as any other external data would be.
 import re
 from collections.abc import Sequence
 
-from opsbrief.ai import AIProvider, CompletionRequest
+from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.brief.schema import (
     BRIEF_OUTPUT_VERSION,
@@ -116,30 +116,45 @@ def generate_brief(
     returns is constrained to a bounded, single-line summary. The brief's
     structured facts — the risks, the notes and the source event IDs — are taken
     from ``context`` unchanged, so the model rephrases the picture but never
-    changes what it says. When the model returns no usable summary, the brief is
-    still produced from the deterministic picture and a note records the gap. The
-    brief records the prompt and output versions it was produced with, so a
-    summary traces to the exact prompt behind it and a consumer can detect a
-    change in either.
+    changes what it says.
+
+    The model is a phrasing layer, not the product, so it is never allowed to
+    fail the brief. When it returns no usable summary, or when the provider
+    cannot produce one at all (a transport error, a timeout, an unparseable
+    reply), the brief is still produced from the deterministic picture and a note
+    records which gap occurred. The brief records the prompt and output versions
+    it was produced with, so a summary traces to the exact prompt behind it and a
+    consumer can detect a change in either.
     """
     request = CompletionRequest(
         instructions=instructions,
         input=render_context(context),
         max_output_tokens=max_output_tokens,
     )
-    response = provider.complete(request)
-    summary = _constrain_summary(response.text)
-
     notes = list(context.notes)
-    if not summary:
+    try:
+        response = provider.complete(request)
+    except AIProviderError:
+        # The provider is only a phrasing layer, so an outage degrades the brief
+        # to the deterministic picture rather than failing the request. The model
+        # is recorded as the provider that was asked, so the gap stays traceable.
+        summary = ""
+        model = provider.name
         notes.append(
-            "The model returned no summary; the brief reports the deterministic picture only."
+            "The model was unavailable, so the brief reports the deterministic picture only."
         )
+    else:
+        summary = _constrain_summary(response.text)
+        model = response.model
+        if not summary:
+            notes.append(
+                "The model returned no summary; the brief reports the deterministic picture only."
+            )
 
     return DailyBrief(
         generated_at=context.generated_at,
         summary=summary,
-        model=response.model,
+        model=model,
         output_version=BRIEF_OUTPUT_VERSION,
         prompt_version=BRIEF_PROMPT_VERSION,
         risks=context.risks,
