@@ -5,6 +5,9 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse
+from opsbrief.api.dependencies import get_ai_provider
+
 
 def submission(**overrides: Any) -> dict[str, Any]:
     """Return a valid event submission payload, with ``overrides`` applied."""
@@ -65,3 +68,29 @@ def test_endpoint_takes_no_parameters(client: TestClient) -> None:
     # A stray query parameter does not break the endpoint; it reports the whole
     # current picture regardless.
     assert client.get("/brief", params={"source": "tasks"}).status_code == 200
+
+
+def test_a_provider_outage_still_returns_the_deterministic_brief(client: TestClient) -> None:
+    # The model is a phrasing layer, so its outage must not turn a brief into a
+    # 500: the endpoint still answers 200 with the deterministic picture.
+    class FailingProvider:
+        name = "failing"
+
+        def complete(self, request: CompletionRequest) -> CompletionResponse:
+            raise AIProviderError("transport failed")
+
+    overdue_id = post_event(
+        client, due_at=(datetime.now(UTC).replace(microsecond=0) - timedelta(hours=2)).isoformat()
+    )
+    client.app.dependency_overrides[get_ai_provider] = FailingProvider
+    try:
+        response = client.get("/brief")
+    finally:
+        client.app.dependency_overrides.pop(get_ai_provider, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"] == ""
+    assert body["risks"][0]["event_ids"] == [overdue_id]
+    assert overdue_id in body["source_event_ids"]
+    assert any("unavailable" in note.lower() for note in body["notes"])

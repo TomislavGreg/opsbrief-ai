@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse, FakeAIProvider
 from opsbrief.brief import (
     BRIEF_OUTPUT_VERSION,
@@ -131,15 +129,36 @@ def test_the_request_is_bounded_and_records_the_rendered_context() -> None:
     assert "Safety inspection for North Stand is overdue" in request.input
 
 
-def test_a_provider_failure_propagates() -> None:
-    class FailingProvider:
-        name = "failing"
+class FailingProvider:
+    """A provider that always fails, standing in for an unavailable model."""
 
-        def complete(self, request: CompletionRequest) -> CompletionResponse:
-            raise AIProviderError("transport failed")
+    name = "failing"
 
-    with pytest.raises(AIProviderError):
-        generate_brief(make_context(), FailingProvider())
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        raise AIProviderError("transport failed")
+
+
+def test_a_provider_failure_degrades_to_the_deterministic_brief() -> None:
+    # The model is only a phrasing layer, so an outage must not fail the brief:
+    # the deterministic picture is still reported, with the summary left empty.
+    risk = make_risk()
+
+    brief = generate_brief(make_context(risks=[risk]), FailingProvider())
+
+    assert brief.summary == ""
+    assert brief.risks == [risk]
+    assert brief.source_event_ids == ["e04"]
+    assert brief.output_version == BRIEF_OUTPUT_VERSION
+    assert brief.prompt_version == BRIEF_PROMPT_VERSION
+    assert any("unavailable" in note.lower() for note in brief.notes)
+
+
+def test_a_provider_failure_records_the_provider_as_the_model() -> None:
+    # With no completion to name a model, the brief records the provider that was
+    # asked, so a degraded brief still traces to where its summary should have come from.
+    brief = generate_brief(make_context(), FailingProvider())
+
+    assert brief.model == "failing"
 
 
 def test_render_context_lists_risks_events_and_notes() -> None:
