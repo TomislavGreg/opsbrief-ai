@@ -956,7 +956,7 @@ started only once the API and core services are stable.
 | AI-034 | Add daily brief API endpoint | AI daily briefs | Done |
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
-| AI-040 | Add incident model and status lifecycle | Incident intelligence | Backlog |
+| AI-040 | Add incident model and status lifecycle | Incident intelligence | In Progress |
 | AI-041 | Link operational events to incidents | Incident intelligence | Backlog |
 | AI-042 | Generate incident timelines | Incident intelligence | Backlog |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Backlog |
