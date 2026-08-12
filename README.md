@@ -106,6 +106,11 @@ produced it.
   `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions
   only, recording when it opened, last changed and stopped being active, with a
   disallowed move refused rather than silently applied.
+- Event linking on an incident: `link_events` and `unlink_events` attach and
+  detach source events without reordering or duplicating the evidence or ever
+  emptying it, refusing to change a closed incident, and `resolve_incident_events`
+  turns an incident's cited IDs into the stored event records they name, in cited
+  order, reporting any that no longer resolve.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -926,6 +931,43 @@ closed incident moves nowhere, and any disallowed move raises
 a new incident, leaving the original untouched, so a caller can compare before
 and after.
 
+### Linking events
+
+The events attributed to an incident are managed with `link_events` and
+`unlink_events`, which follow the same immutable, deterministic shape as the
+transitions:
+
+```python
+from opsbrief.incidents import resolve_incident_events
+
+incident = incident.link_events(["e20", "e21"], at=now)  # a new failure joins
+incident.event_ids  # ["e17", "e18", "e19", "e20", "e21"]
+incident = incident.unlink_events(["e18"], at=now)  # attributed in error, removed
+```
+
+Linking appends only identifiers not already present, in the order given, so it
+never reorders or duplicates the evidence and re-linking is a no-op; unlinking
+ignores identifiers that are not linked. An incident must always cite at least
+one source event, so an unlink that would remove the last is refused, and a
+closed incident is a finished record whose evidence is frozen, so linking to or
+unlinking from one raises `IncidentClosedError`.
+
+An incident holds the identifiers of its events, not the events themselves.
+`resolve_incident_events` turns those identifiers into the stored event records
+they name, against any collection of events the caller supplies — typically the
+current history:
+
+```python
+resolved = resolve_incident_events(incident, events)  # events: stored Events
+
+resolved.events  # the cited events, in the incident's cited order
+resolved.missing_event_ids  # cited IDs no stored event answered to
+```
+
+The events come back in the order the incident cites them, and every cited
+identifier is accounted for exactly once — either as a resolved event or as a
+missing ID — so a gap in the evidence is stated plainly rather than passed over.
+
 ## Development Commands
 
 ```bash
@@ -1010,7 +1052,7 @@ started only once the API and core services are stable.
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
-| AI-041 | Link operational events to incidents | Incident intelligence | In Progress |
+| AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Backlog |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Backlog |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
@@ -1048,6 +1090,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
 - 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
 - 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
 - 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
@@ -1061,7 +1104,6 @@ it is not picked up and left half-finished.
 - 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
 - 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
 - 2026-08-05 — Added the overdue-work rule: it raises a traceable risk for every event past its deadline and not resolved or cancelled, escalating from medium to high once a day late.
-- 2026-08-05 — Added the deterministic risk contract and rule interface: a `Risk` that traces back to its rule and source events, a `RiskRule` protocol and a `detect_risks` detector, ready for concrete rules to implement.
 
 ## Future Game Center Integration
 
