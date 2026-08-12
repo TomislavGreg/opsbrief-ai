@@ -1020,7 +1020,8 @@ suggested next actions, the source event IDs used, and where the data is
 incomplete.
 
 **Phase 4, Incident intelligence.** Incident model and lifecycle, event
-linking, timelines, AI summaries, API endpoints and resolution notes.
+linking, persistence, declaring incidents from related events, timelines, AI
+summaries, API endpoints and resolution notes.
 
 **Phase 5, Safety and explainability.** Field redaction, configurable AI
 context exclusions, source references on generated output, confidence and
@@ -1066,10 +1067,12 @@ started only once the API and core services are stable.
 | AI-037 | Degrade the daily brief when the provider fails | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
-| AI-042 | Generate incident timelines | Incident intelligence | Backlog |
+| AI-042 | Generate incident timelines | Incident intelligence | Ready |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Backlog |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
+| AI-046 | Add incident persistence | Incident intelligence | Ready |
+| AI-047 | Declare incidents from stored events | Incident intelligence | Backlog |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Backlog |
 | AI-052 | Add source references to generated output | Safety and explainability | Backlog |
@@ -1092,7 +1095,14 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked.
+No tickets are currently blocked. The next Ready tickets are AI-042 (incident
+timelines) and AI-046 (incident persistence): both have their dependencies
+complete and can be picked up now. The other Phase 4 tickets stay in Backlog
+until the work they build on lands — AI-043 needs the timelines from AI-042,
+AI-044 needs persistence (AI-046) and declaration (AI-047), AI-045 needs the
+endpoints from AI-044, and AI-047 needs somewhere to store what it declares
+(AI-046). When a ticket's dependencies are complete, promote it to Ready so the
+next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
