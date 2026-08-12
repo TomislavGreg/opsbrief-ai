@@ -9,12 +9,15 @@ from opsbrief.incidents.lifecycle import (
     InvalidIncidentTransition,
     can_transition,
 )
+from opsbrief.incidents.schema import Incident, IncidentSeverity
 
 __all__ = [
     "ACTIVE_STATUSES",
     "ALLOWED_TRANSITIONS",
     "INACTIVE_STATUSES",
     "TERMINAL_STATUSES",
+    "Incident",
+    "IncidentSeverity",
     "IncidentStatus",
     "InvalidIncidentTransition",
     "can_transition",
