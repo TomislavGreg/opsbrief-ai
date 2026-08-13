@@ -1067,7 +1067,7 @@ started only once the API and core services are stable.
 | AI-037 | Degrade the daily brief when the provider fails | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
-| AI-042 | Generate incident timelines | Incident intelligence | Ready |
+| AI-042 | Generate incident timelines | Incident intelligence | In Progress |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Backlog |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
