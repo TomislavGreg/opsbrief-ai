@@ -116,6 +116,10 @@ produced it.
   emptying it, refusing to change a closed incident, and `resolve_incident_events`
   turns an incident's cited IDs into the stored event records they name, in cited
   order, reporting any that no longer resolve.
+- Incident timelines: `build_incident_timeline` lays an incident's cited events
+  out in the order they occurred, oldest first, so a disruption reads forward in
+  time, reporting the span it ran over and any cited ID that no stored event
+  answers to.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -980,6 +984,36 @@ The events come back in the order the incident cites them, and every cited
 identifier is accounted for exactly once — either as a resolved event or as a
 missing ID — so a gap in the evidence is stated plainly rather than passed over.
 
+### Timelines
+
+An incident cites its events in the order they were linked, which is not
+necessarily the order they happened. To read a disruption as a story a reader
+needs them laid out in time. `build_incident_timeline` is that view: it resolves
+the cited events against the stored records and orders the resolved ones by when
+they occurred, oldest first.
+
+```python
+from opsbrief.incidents import build_incident_timeline
+
+timeline = build_incident_timeline(incident, events)  # events: stored Events
+
+timeline.entries  # the cited events, oldest occurred first
+timeline.started_at  # when the first timeline event occurred, or None
+timeline.ended_at  # when the last timeline event occurred, or None
+timeline.missing_event_ids  # cited IDs no stored event answered to
+```
+
+Each entry is a stored event reduced to the fields a timeline describes it with,
+carrying its `id` so a reader can look it up but not the free-form `metadata`,
+for the same reason a brief's recent-events digest leaves it out. Ties on the
+occurrence instant are broken by event id, so the order is total and does not
+depend on the order the events arrived in. `started_at` and `ended_at` are
+derived from the ordered entries, so they never disagree with them, and a
+timeline with no resolved events has neither. The timeline builds on the same
+resolution as `resolve_incident_events`, so a cited ID with no stored record is
+reported in `missing_event_ids` rather than dropped, and every cited identifier
+is accounted for exactly once, as either an entry or a missing ID.
+
 ## Development Commands
 
 ```bash
@@ -1067,8 +1101,8 @@ started only once the API and core services are stable.
 | AI-037 | Degrade the daily brief when the provider fails | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
-| AI-042 | Generate incident timelines | Incident intelligence | In Progress |
-| AI-043 | Generate AI incident summaries | Incident intelligence | Backlog |
+| AI-042 | Generate incident timelines | Incident intelligence | Done |
+| AI-043 | Generate AI incident summaries | Incident intelligence | Ready |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
 | AI-046 | Add incident persistence | Incident intelligence | Ready |
@@ -1095,12 +1129,12 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. The next Ready tickets are AI-042 (incident
-timelines) and AI-046 (incident persistence): both have their dependencies
-complete and can be picked up now. The other Phase 4 tickets stay in Backlog
-until the work they build on lands — AI-043 needs the timelines from AI-042,
-AI-044 needs persistence (AI-046) and declaration (AI-047), AI-045 needs the
-endpoints from AI-044, and AI-047 needs somewhere to store what it declares
+No tickets are currently blocked. The next Ready tickets are AI-043 (AI incident
+summaries), now that AI-042 has landed the timelines it builds on, and AI-046
+(incident persistence): both have their dependencies complete and can be picked
+up now. The other Phase 4 tickets stay in Backlog until the work they build on
+lands — AI-044 needs persistence (AI-046) and declaration (AI-047), AI-045 needs
+the endpoints from AI-044, and AI-047 needs somewhere to store what it declares
 (AI-046). When a ticket's dependencies are complete, promote it to Ready so the
 next change has a clear starting point.
 
@@ -1113,6 +1147,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
 - 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
 - 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
 - 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
@@ -1126,7 +1161,6 @@ it is not picked up and left half-finished.
 - 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
 - 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
 - 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
-- 2026-08-06 — Added the blocked-work rule: it raises a traceable risk for every event a producer reported as blocked, escalating from medium to high once the work has been blocked for at least a day.
 
 ## Future Game Center Integration
 
