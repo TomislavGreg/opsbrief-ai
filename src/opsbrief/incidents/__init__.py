@@ -16,6 +16,7 @@ from opsbrief.incidents.summary import (
     INCIDENT_SUMMARY_PROMPT_VERSION,
     MAX_INCIDENT_SUMMARY_LENGTH,
     IncidentSummary,
+    generate_incident_summary,
 )
 from opsbrief.incidents.timeline import (
     IncidentTimeline,
@@ -42,5 +43,6 @@ __all__ = [
     "TimelineEntry",
     "build_incident_timeline",
     "can_transition",
+    "generate_incident_summary",
     "resolve_incident_events",
 ]
