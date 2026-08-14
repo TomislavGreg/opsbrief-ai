@@ -1102,7 +1102,7 @@ started only once the API and core services are stable.
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
-| AI-043 | Generate AI incident summaries | Incident intelligence | Ready |
+| AI-043 | Generate AI incident summaries | Incident intelligence | In Progress |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
 | AI-046 | Add incident persistence | Incident intelligence | Ready |
