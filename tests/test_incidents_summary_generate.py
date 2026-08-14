@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from opsbrief.ai import FakeAIProvider
+from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse, FakeAIProvider
 from opsbrief.events import Event, EventInput
 from opsbrief.incidents import (
     INCIDENT_SUMMARY_OUTPUT_VERSION,
@@ -139,3 +139,36 @@ def test_generating_a_summary_does_not_mutate_the_incident() -> None:
 
     assert incident.event_ids == ["e1", "e2"]
     assert incident.status is IncidentStatus.OPEN
+
+
+class FailingProvider:
+    """A provider that always fails, standing in for an unavailable model."""
+
+    name = "failing"
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        raise AIProviderError("transport failed")
+
+
+def test_a_provider_failure_degrades_to_the_deterministic_summary() -> None:
+    # The model is only a phrasing layer, so an outage must not fail the summary:
+    # the deterministic picture is still reported, with the summary left empty.
+    incident = make_incident(["e1", "e2"])
+    events = [make_event("e1", minutes_ago=90), make_event("e2", minutes_ago=10)]
+
+    result = generate_incident_summary(incident, events, FailingProvider())
+
+    assert result.summary == ""
+    assert result.source_event_ids == ["e1", "e2"]
+    assert result.started_at == NOW - timedelta(minutes=90)
+    assert result.output_version == INCIDENT_SUMMARY_OUTPUT_VERSION
+    assert result.prompt_version == INCIDENT_SUMMARY_PROMPT_VERSION
+    assert any("unavailable" in note.lower() for note in result.notes)
+
+
+def test_a_provider_failure_records_the_provider_as_the_model() -> None:
+    # With no completion to name a model, the summary records the provider that was
+    # asked, so a degraded summary still traces to where its prose should have come from.
+    result = generate_incident_summary(make_incident(["e1"]), [make_event("e1")], FailingProvider())
+
+    assert result.model == "failing"
