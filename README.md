@@ -120,6 +120,12 @@ produced it.
   out in the order they occurred, oldest first, so a disruption reads forward in
   time, reporting the span it ran over and any cited ID that no stored event
   answers to.
+- AI incident summaries: `generate_incident_summary` turns an incident and its
+  timeline into an `IncidentSummary` whose prose is phrased by the configured
+  provider and whose status, severity, span, cited events and missing-event notes
+  are carried over deterministically, with the model's output constrained as
+  untrusted data and a provider outage degrading to the deterministic picture
+  rather than failing.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -1014,6 +1020,46 @@ resolution as `resolve_incident_events`, so a cited ID with no stored record is
 reported in `missing_event_ids` rather than dropped, and every cited identifier
 is accounted for exactly once, as either an entry or a missing ID.
 
+### AI summaries
+
+An incident timeline reads a disruption forward in time; an incident summary
+reads it back as a short story: what happened, in what order, and where it stands
+now. Like a daily brief, it divides its work strictly. The facts are assembled
+deterministically from the incident and its timeline, and a language model is
+asked only to phrase them.
+
+```python
+from opsbrief.ai import create_provider
+from opsbrief.incidents import generate_incident_summary
+
+summary = generate_incident_summary(incident, events, create_provider())
+
+summary.summary  # the incident in prose, phrased by the model
+summary.status  # where the incident sits in its lifecycle
+summary.severity  # how serious it is
+summary.started_at, summary.ended_at  # the span its cited events ran over
+summary.source_event_ids  # the incident's cited events, in cited order
+summary.missing_event_ids  # cited IDs no stored event answered to
+summary.notes  # where the picture is incomplete
+```
+
+Only the `summary` comes from the model, and it is treated as untrusted: it is
+collapsed to a single line and truncated to a bounded length, so injected
+formatting or unbounded text cannot shape it. Everything else is carried straight
+from the incident and its timeline, so the model rephrases the picture but never
+changes what it says, never moves the incident, and never invents an event. The
+`source_event_ids` are the incident's cited events in cited order, so a summary
+traces back to the same evidence the incident does, and any cited ID that no
+stored event answers to is carried in `missing_event_ids` and noted rather than
+implied away. Every summary records the `model` that phrased it, the
+`prompt_version` behind that prose and the `output_version` of its structure, so
+a stored summary stays interpretable and a change in phrasing or shape stays
+visible. The model is a phrasing layer, not the product, so it never fails the
+summary: when it returns no usable text, or when the provider is unavailable, the
+deterministic picture is still returned with an empty summary and a note recording
+which gap occurred, and an outage records the provider that was asked as the
+model.
+
 ## Development Commands
 
 ```bash
@@ -1102,7 +1148,7 @@ started only once the API and core services are stable.
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
-| AI-043 | Generate AI incident summaries | Incident intelligence | In Progress |
+| AI-043 | Generate AI incident summaries | Incident intelligence | Done |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
 | AI-046 | Add incident persistence | Incident intelligence | Ready |
@@ -1129,14 +1175,13 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. The next Ready tickets are AI-043 (AI incident
-summaries), now that AI-042 has landed the timelines it builds on, and AI-046
-(incident persistence): both have their dependencies complete and can be picked
-up now. The other Phase 4 tickets stay in Backlog until the work they build on
-lands — AI-044 needs persistence (AI-046) and declaration (AI-047), AI-045 needs
-the endpoints from AI-044, and AI-047 needs somewhere to store what it declares
-(AI-046). When a ticket's dependencies are complete, promote it to Ready so the
-next change has a clear starting point.
+No tickets are currently blocked. The next Ready ticket is AI-046 (incident
+persistence): its dependencies are complete and it can be picked up now. The other
+Phase 4 tickets stay in Backlog until the work they build on lands. AI-044 needs
+persistence (AI-046) and declaration (AI-047), AI-045 needs the endpoints from
+AI-044, and AI-047 needs somewhere to store what it declares (AI-046). When a
+ticket's dependencies are complete, promote it to Ready so the next change has a
+clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1147,6 +1192,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
 - 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
 - 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
 - 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
@@ -1160,7 +1206,6 @@ it is not picked up and left half-finished.
 - 2026-08-08 — Added the AI provider interface: a bounded completion request/response contract and an `AIProvider` protocol, used only to turn assembled material into prose and never to decide risks.
 - 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
 - 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
-- 2026-08-06 — Added the repeated-integration-failure rule: it raises a traceable risk for an integration that failed at least three times in the last week without recovering since, escalating to critical for a larger run.
 
 ## Future Game Center Integration
 
