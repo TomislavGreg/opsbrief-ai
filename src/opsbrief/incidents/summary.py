@@ -15,12 +15,15 @@ the timeline lays out, and a cited identifier with no stored record is reported
 as missing here exactly as it is there.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.incidents.lifecycle import IncidentStatus
-from opsbrief.incidents.schema import IncidentSeverity
+from opsbrief.incidents.schema import Incident, IncidentSeverity
+from opsbrief.incidents.timeline import IncidentTimeline, TimelineEntry
 
 #: Upper bound, in characters, on an incident summary's model-phrased text. The
 #: summary is untrusted model output, so it is constrained to a bounded length
@@ -119,3 +122,67 @@ class IncidentSummary(BaseModel):
         default_factory=list,
         description="Where the picture is incomplete, for example missing events or no summary.",
     )
+
+
+#: The task the model performs, phrased by the service. It asks only for prose:
+#: the model reads the incident's timeline back as a short story and never decides
+#: what it contains. Changing this text, or the material rendering below, is a
+#: change of prompt: bump :data:`INCIDENT_SUMMARY_PROMPT_VERSION` when it happens.
+DEFAULT_INCIDENT_INSTRUCTIONS = (
+    "You are summarising one operational incident for a duty manager. Using only "
+    "the incident details and its timeline of events provided, write a short, plain "
+    "summary of what happened, in what order, and where the incident stands now. Do "
+    "not invent events, numbers or outcomes beyond those given, and do not include "
+    "identifiers."
+)
+
+
+def _render_entry(entry: TimelineEntry) -> str:
+    """Render one timeline event as a single deterministic line of material."""
+    status = entry.status.value if entry.status is not None else "unknown"
+    return (
+        f"- {entry.occurred_at.isoformat()} [{entry.severity.value}] {entry.source} "
+        f"{entry.event_type}: {entry.subject} (status: {status})"
+    )
+
+
+def _render_section(title: str, lines: Sequence[str]) -> list[str]:
+    """Render a titled block, or a plain 'none' line when it is empty."""
+    if not lines:
+        return [f"{title}: none."]
+    return [f"{title}:", *lines]
+
+
+def render_incident_material(incident: Incident, timeline: IncidentTimeline) -> str:
+    """Render an incident and its timeline as the material shown to the model.
+
+    The rendering is deterministic and bounded: the timeline is already bounded to
+    the incident's cited events, and the result is capped at
+    :data:`~opsbrief.ai.schema.MAX_PROMPT_LENGTH` so the request the provider
+    receives is always well-formed. The span is stated from the timeline, so the
+    model is shown the same start and end a reader would see, and missing cited
+    events are noted so the model is not misled into implying a complete picture.
+    """
+    span = "no cited events resolved to a stored record"
+    if timeline.started_at is not None and timeline.ended_at is not None:
+        span = f"{timeline.started_at.isoformat()} to {timeline.ended_at.isoformat()}"
+    lines: list[str] = [
+        f"Incident: {incident.title}",
+        f"Status: {incident.status.value}",
+        f"Severity: {incident.severity.value}",
+        f"Span: {span}",
+        "",
+        *_render_section(
+            "Timeline (oldest first)", [_render_entry(entry) for entry in timeline.entries]
+        ),
+    ]
+    if timeline.missing_event_ids:
+        missing = len(timeline.missing_event_ids)
+        lines += [
+            "",
+            f"Note: {missing} cited event(s) no longer resolve to a stored record.",
+        ]
+    rendered = "\n".join(lines)
+    if len(rendered) > MAX_PROMPT_LENGTH:
+        return rendered[:MAX_PROMPT_LENGTH].rstrip()
+    return rendered
