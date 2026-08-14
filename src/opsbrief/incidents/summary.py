@@ -21,7 +21,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from opsbrief.ai import AIProvider, CompletionRequest
+from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.events import Event
 from opsbrief.incidents.lifecycle import IncidentStatus
@@ -231,6 +231,13 @@ def generate_incident_summary(
     order, so it traces back to the same evidence the incident does, and any cited
     identifier no stored event answered to is carried in ``missing_event_ids`` and
     noted, so a gap in the evidence is stated plainly rather than implied away.
+
+    The model is a phrasing layer, not the product, so it is never allowed to fail
+    the summary. When it returns no usable text, or when the provider cannot produce
+    one at all (a transport error, a timeout, an unparseable reply), the summary is
+    still produced from the deterministic picture and a note records which gap
+    occurred. On an outage the provider that was asked is recorded as the model, so
+    even a degraded summary traces to where its prose should have come from.
     """
     timeline = build_incident_timeline(incident, events)
     request = CompletionRequest(
@@ -245,14 +252,26 @@ def generate_incident_summary(
             "to a stored record."
         )
 
-    response = provider.complete(request)
-    summary = _constrain_summary(response.text)
-    model = response.model
-    if not summary:
+    try:
+        response = provider.complete(request)
+    except AIProviderError:
+        # The provider is only a phrasing layer, so an outage degrades the summary
+        # to the deterministic picture rather than failing the request. The model is
+        # recorded as the provider that was asked, so the gap stays traceable.
+        summary = ""
+        model = provider.name
         notes.append(
-            "The model returned no summary; the incident summary reports the "
+            "The model was unavailable, so the incident summary reports the "
             "deterministic picture only."
         )
+    else:
+        summary = _constrain_summary(response.text)
+        model = response.model
+        if not summary:
+            notes.append(
+                "The model returned no summary; the incident summary reports the "
+                "deterministic picture only."
+            )
 
     return IncidentSummary(
         incident_id=incident.id,
