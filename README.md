@@ -126,6 +126,11 @@ produced it.
   are carried over deterministically, with the model's output constrained as
   untrusted data and a provider outage degrading to the deterministic picture
   rather than failing.
+- Incident persistence: an `IncidentStore` that keeps declared incidents in
+  SQLite, recording a declaration and saving each later change (a transition or
+  an event link) so a tracked incident survives a restart, and reading them back
+  by id or as a most-recently-opened-first listing filtered by status, with the
+  ordered source event IDs preserved.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -146,7 +151,7 @@ src/opsbrief/
   risks/        Deterministic risk contract and rule interface
   samples/      Synthetic operational-event fixtures and their loader
   services/     Logic behind the routers
-  storage/      SQLite connection handling and the event store
+  storage/      SQLite connection handling and the event and incident stores
   cli.py        Command-line daily-brief generation
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
@@ -577,6 +582,37 @@ lock and transaction, deduplicating each event against both stored events and
 earlier events in the same batch, so a resubmitted batch stays all-or-nothing
 and never lands a duplicate. There is no object-relational mapper: nothing in
 the roadmap yet needs one.
+
+Incidents are kept the same way, in an `incidents` table addressed by the same
+`OPSBRIEF_DATABASE_URL`. `IncidentStore` mirrors the event store's shape and
+guards its connection with the same lock, but an incident is stateful where an
+event is not, so writing and changing are kept apart: `add` records a newly
+declared incident and refuses an identifier already in use, while `save`
+overwrites one already stored with its current state, so a transition or an
+event link is recorded whole, and refuses an incident that is not there rather
+than silently declaring a fresh one. `get`, `list_incidents` and `count` read
+them back, most recently opened first and optionally filtered by status. An
+incident's ordered `event_ids` are stored as JSON, so its evidence round-trips
+in the order it was linked.
+
+```python
+from opsbrief.incidents import Incident, IncidentSeverity, IncidentStatus
+from opsbrief.storage import IncidentStore
+
+with IncidentStore.open("sqlite:///./opsbrief.db") as store:
+    incident = Incident.declare(
+        title="Ticketing integration failing repeatedly",
+        severity=IncidentSeverity.HIGH,
+        event_ids=["e17", "e18", "e19"],
+    )
+    store.add(incident)
+
+    working = incident.transition_to(IncidentStatus.INVESTIGATING)
+    store.save(working)  # persist the state change
+
+    store.get(incident.id)  # the stored incident, or None
+    store.list_incidents(status=IncidentStatus.OPEN)  # most recently opened first
+```
 
 ## Sample Data
 
@@ -1151,8 +1187,8 @@ started only once the API and core services are stable.
 | AI-043 | Generate AI incident summaries | Incident intelligence | Done |
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
-| AI-046 | Add incident persistence | Incident intelligence | Ready |
-| AI-047 | Declare incidents from stored events | Incident intelligence | Backlog |
+| AI-046 | Add incident persistence | Incident intelligence | Done |
+| AI-047 | Declare incidents from stored events | Incident intelligence | Ready |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Backlog |
 | AI-052 | Add source references to generated output | Safety and explainability | Backlog |
@@ -1175,13 +1211,12 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. The next Ready ticket is AI-046 (incident
-persistence): its dependencies are complete and it can be picked up now. The other
-Phase 4 tickets stay in Backlog until the work they build on lands. AI-044 needs
-persistence (AI-046) and declaration (AI-047), AI-045 needs the endpoints from
-AI-044, and AI-047 needs somewhere to store what it declares (AI-046). When a
-ticket's dependencies are complete, promote it to Ready so the next change has a
-clear starting point.
+No tickets are currently blocked. The next Ready ticket is AI-047 (declare
+incidents from stored events): incident persistence (AI-046) now gives it
+somewhere to store what it declares. The other Phase 4 tickets stay in Backlog
+until the work they build on lands. AI-044 needs the declaration from AI-047,
+and AI-045 needs the endpoints from AI-044. When a ticket's dependencies are
+complete, promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1192,6 +1227,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
 - 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
 - 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
 - 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
@@ -1205,7 +1241,6 @@ it is not picked up and left half-finished.
 - 2026-08-08 — Added a deterministic fake AI provider with scripted and echoed completions, and a `create_provider` factory that selects the provider named by `OPSBRIEF_AI_PROVIDER`.
 - 2026-08-08 — Added the AI provider interface: a bounded completion request/response contract and an `AIProvider` protocol, used only to turn assembled material into prose and never to decide risks.
 - 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
-- 2026-08-07 — Added deterministic risk priority scoring: `prioritize` ranks risks from every rule against each other by severity, then evidence, so the most pressing surfaces first.
 
 ## Future Game Center Integration
 
