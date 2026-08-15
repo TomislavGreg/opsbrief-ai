@@ -30,6 +30,20 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS events_occurred_at_idx ON events (occurred_at);
 CREATE INDEX IF NOT EXISTS events_source_external_id_idx ON events (source, external_id);
+
+CREATE TABLE IF NOT EXISTS incidents (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    severity     TEXT NOT NULL,
+    opened_at    TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    resolved_at  TEXT,
+    event_ids    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS incidents_opened_at_idx ON incidents (opened_at);
+CREATE INDEX IF NOT EXISTS incidents_status_idx ON incidents (status);
 """
 
 
