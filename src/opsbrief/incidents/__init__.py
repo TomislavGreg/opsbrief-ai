@@ -3,6 +3,7 @@
 from opsbrief.incidents.declaration import (
     RISK_TO_INCIDENT_SEVERITY,
     declare_incident_from_risk,
+    declare_incidents_from_events,
 )
 from opsbrief.incidents.lifecycle import (
     ACTIVE_STATUSES,
@@ -49,6 +50,7 @@ __all__ = [
     "build_incident_timeline",
     "can_transition",
     "declare_incident_from_risk",
+    "declare_incidents_from_events",
     "generate_incident_summary",
     "resolve_incident_events",
 ]
