@@ -15,7 +15,16 @@ from opsbrief.incidents.lifecycle import (
     can_transition,
 )
 from opsbrief.incidents.linking import IncidentEvents, resolve_incident_events
-from opsbrief.incidents.schema import Incident, IncidentClosedError, IncidentSeverity
+from opsbrief.incidents.schema import (
+    DEFAULT_INCIDENT_PAGE_SIZE,
+    MAX_INCIDENT_PAGE_SIZE,
+    Incident,
+    IncidentClosedError,
+    IncidentDeclaration,
+    IncidentPage,
+    IncidentQuery,
+    IncidentSeverity,
+)
 from opsbrief.incidents.summary import (
     INCIDENT_SUMMARY_OUTPUT_VERSION,
     INCIDENT_SUMMARY_PROMPT_VERSION,
@@ -32,15 +41,20 @@ from opsbrief.incidents.timeline import (
 __all__ = [
     "ACTIVE_STATUSES",
     "ALLOWED_TRANSITIONS",
+    "DEFAULT_INCIDENT_PAGE_SIZE",
     "INACTIVE_STATUSES",
     "INCIDENT_SUMMARY_OUTPUT_VERSION",
     "INCIDENT_SUMMARY_PROMPT_VERSION",
+    "MAX_INCIDENT_PAGE_SIZE",
     "MAX_INCIDENT_SUMMARY_LENGTH",
     "RISK_TO_INCIDENT_SEVERITY",
     "TERMINAL_STATUSES",
     "Incident",
     "IncidentClosedError",
+    "IncidentDeclaration",
     "IncidentEvents",
+    "IncidentPage",
+    "IncidentQuery",
     "IncidentSeverity",
     "IncidentStatus",
     "IncidentSummary",

@@ -28,6 +28,28 @@ from opsbrief.incidents.lifecycle import (
     can_transition,
 )
 
+#: Default and maximum page sizes for listing stored incidents, matching the
+#: event listing so the two resources page the same way.
+DEFAULT_INCIDENT_PAGE_SIZE = 50
+MAX_INCIDENT_PAGE_SIZE = 500
+
+
+def _check_distinct_nonblank_ids(value: list[str]) -> list[str]:
+    """Reject blank or repeated identifiers so the evidence stays traceable.
+
+    A blank id points at nothing, and a repeated id overstates the evidence, so
+    both are refused rather than silently kept. Shared by the incident model and
+    the declaration request body so both apply the same rule.
+    """
+    seen: set[str] = set()
+    for event_id in value:
+        if not event_id.strip():
+            raise ValueError("event_ids must not contain a blank identifier")
+        if event_id in seen:
+            raise ValueError(f"event_ids must be unique; {event_id!r} appears more than once")
+        seen.add(event_id)
+    return value
+
 
 class IncidentClosedError(ValueError):
     """Raised when an operation would change a closed incident.
@@ -114,19 +136,7 @@ class Incident(BaseModel):
     @field_validator("event_ids")
     @classmethod
     def _check_event_ids(cls, value: list[str]) -> list[str]:
-        """Reject blank or repeated identifiers so the evidence stays traceable.
-
-        A blank id points at nothing, and a repeated id overstates the evidence,
-        so both are refused rather than silently kept.
-        """
-        seen: set[str] = set()
-        for event_id in value:
-            if not event_id.strip():
-                raise ValueError("event_ids must not contain a blank identifier")
-            if event_id in seen:
-                raise ValueError(f"event_ids must be unique; {event_id!r} appears more than once")
-            seen.add(event_id)
-        return value
+        return _check_distinct_nonblank_ids(value)
 
     @model_validator(mode="after")
     def _check_lifecycle_invariants(self) -> "Incident":
@@ -250,3 +260,75 @@ class Incident(BaseModel):
             raise ValueError("an incident must keep at least one source event")
         moment = at or datetime.now(UTC)
         return self.model_copy(update={"event_ids": remaining, "updated_at": moment})
+
+
+class IncidentDeclaration(BaseModel):
+    """A request to declare a new incident from the events behind it.
+
+    This is the body a caller posts to open an incident: the parts a person
+    decides (a title, how serious it is, and the source events it groups). The
+    service assigns the identifier and the timestamps and starts the incident
+    ``open``, so those are not part of the request. Unknown fields are rejected
+    so a mistyped body fails loudly rather than being silently dropped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=200,
+        description="One-line human-readable description of the incident.",
+    )
+    severity: IncidentSeverity = Field(
+        description="How serious the incident is.",
+    )
+    event_ids: list[str] = Field(
+        min_length=1,
+        description="Source event IDs behind the incident, in link order, distinct and non-blank.",
+    )
+
+    @field_validator("event_ids")
+    @classmethod
+    def _check_event_ids(cls, value: list[str]) -> list[str]:
+        return _check_distinct_nonblank_ids(value)
+
+
+class IncidentQuery(BaseModel):
+    """Filters and pagination for listing stored incidents.
+
+    The status filter is optional and matches the incident's lifecycle state
+    exactly; omitting it lists incidents in every state. Unknown fields are
+    rejected so a mistyped filter fails loudly instead of being silently ignored
+    and returning the wrong page.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: IncidentStatus | None = Field(
+        default=None,
+        description="Return only incidents in this lifecycle state.",
+    )
+    limit: int = Field(
+        default=DEFAULT_INCIDENT_PAGE_SIZE,
+        ge=1,
+        le=MAX_INCIDENT_PAGE_SIZE,
+        description=f"How many incidents to return, between 1 and {MAX_INCIDENT_PAGE_SIZE}.",
+    )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="How many matching incidents to skip before the page begins.",
+    )
+
+
+class IncidentPage(BaseModel):
+    """One page of stored incidents matching a listing query."""
+
+    total: int = Field(
+        description="How many stored incidents match the filter, across all pages.",
+    )
+    limit: int = Field(description="The page size the listing was taken with.")
+    offset: int = Field(description="How many matching incidents were skipped.")
+    incidents: list[Incident] = Field(
+        description="The incidents in this page, most recently opened first.",
+    )
