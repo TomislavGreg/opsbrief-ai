@@ -1,5 +1,9 @@
 """Incident intelligence: stateful records assembled from related events."""
 
+from opsbrief.incidents.declaration import (
+    RISK_TO_INCIDENT_SEVERITY,
+    declare_incident_from_risk,
+)
 from opsbrief.incidents.lifecycle import (
     ACTIVE_STATUSES,
     ALLOWED_TRANSITIONS,
@@ -31,6 +35,7 @@ __all__ = [
     "INCIDENT_SUMMARY_OUTPUT_VERSION",
     "INCIDENT_SUMMARY_PROMPT_VERSION",
     "MAX_INCIDENT_SUMMARY_LENGTH",
+    "RISK_TO_INCIDENT_SEVERITY",
     "TERMINAL_STATUSES",
     "Incident",
     "IncidentClosedError",
@@ -43,6 +48,7 @@ __all__ = [
     "TimelineEntry",
     "build_incident_timeline",
     "can_transition",
+    "declare_incident_from_risk",
     "generate_incident_summary",
     "resolve_incident_events",
 ]
