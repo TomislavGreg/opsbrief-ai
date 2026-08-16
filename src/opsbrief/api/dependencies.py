@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from opsbrief.ai import AIProvider, create_provider
-from opsbrief.storage import EventStore
+from opsbrief.storage import EventStore, IncidentStore
 
 
 def get_event_store(request: Request) -> EventStore:
@@ -22,6 +22,22 @@ def get_event_store(request: Request) -> EventStore:
 
 
 EventStoreDependency = Annotated[EventStore, Depends(get_event_store)]
+
+
+def get_incident_store(request: Request) -> IncidentStore:
+    """Return the incident store the running application owns.
+
+    Like the event store, it is opened when the application starts and closed
+    when it stops, so a missing one means the request arrived outside the
+    application lifespan rather than that the database is unreachable.
+    """
+    store: IncidentStore | None = getattr(request.app.state, "incident_store", None)
+    if store is None:
+        raise RuntimeError("the incident store is unavailable: the application has not started up")
+    return store
+
+
+IncidentStoreDependency = Annotated[IncidentStore, Depends(get_incident_store)]
 
 
 def get_ai_provider() -> AIProvider:
