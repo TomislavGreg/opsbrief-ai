@@ -8,14 +8,20 @@ together. The risk's cited events become the incident's evidence, its title
 becomes the incident's title and its severity becomes the incident's severity,
 so the incident traces back to exactly the events the rule fired on.
 
-The declaration is a pure function of the risk and the instant it is declared
-at, so the same risk always yields the same incident. Persisting it is a
-separate step, left to the caller.
+The declaration is a pure function of the risks and the instant they are
+declared at, so the same events always yield the same incidents. Persisting them
+is a separate step: :func:`declare_incidents_from_events` returns the incidents
+it opens and leaves the caller to store whichever it wants to track.
 """
 
-from datetime import datetime
+from collections.abc import Iterable, Sequence
+from datetime import UTC, datetime
 
+from opsbrief.events.schema import Event
 from opsbrief.incidents.schema import Incident, IncidentSeverity
+from opsbrief.risks.engine import RiskRule, detect_risks
+from opsbrief.risks.priority import prioritize
+from opsbrief.risks.rules import default_rules
 from opsbrief.risks.schema import Risk, RiskSeverity
 
 #: How a risk's severity maps onto an incident's. Both scales run ``low`` to
@@ -53,3 +59,24 @@ def declare_incident_from_risk(
         at=at,
         incident_id=incident_id,
     )
+
+
+def declare_incidents_from_events(
+    events: Iterable[Event],
+    *,
+    at: datetime | None = None,
+    rules: Sequence[RiskRule] | None = None,
+) -> list[Incident]:
+    """Open an incident for every risk recognised over ``events``.
+
+    The risks are detected with ``rules`` (the canonical rule set by default),
+    judged against ``at`` (now by default) so the reference instant is shared by
+    the detection and the incidents it seeds, and ranked most urgent first before
+    an incident is declared for each. The result is therefore ordered most urgent
+    first too, and events raising no risk produce no incident. Nothing is stored:
+    the caller decides which of the returned incidents to persist and track.
+    """
+    reference = at or datetime.now(UTC)
+    rule_set = default_rules(reference) if rules is None else rules
+    risks = prioritize(detect_risks(events, rule_set))
+    return [declare_incident_from_risk(risk, at=reference) for risk in risks]
