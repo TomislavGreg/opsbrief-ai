@@ -1188,7 +1188,7 @@ started only once the API and core services are stable.
 | AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
-| AI-047 | Declare incidents from stored events | Incident intelligence | Ready |
+| AI-047 | Declare incidents from stored events | Incident intelligence | In Progress |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Backlog |
 | AI-052 | Add source references to generated output | Safety and explainability | Backlog |
