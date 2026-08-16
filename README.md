@@ -137,6 +137,11 @@ produced it.
   events and opens one incident per recognised risk, most urgent first, so the
   events a rule already grouped become a trackable incident without a model
   re-deciding what belongs together.
+- Incident API endpoints: `POST /incidents` declares an incident from a posted
+  title, severity and source events and stores it; `GET /incidents` lists stored
+  incidents most recently opened first, filtered by status and paginated; and
+  `GET /incidents/{incident_id}` returns a single stored incident, or 404 when no
+  incident carries that identifier.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -497,6 +502,79 @@ picture and a note recording which gap occurred, rather than an error.
 `prompt_version` the prompt that phrased its summary, so a stored or piped brief
 stays interpretable and a change in either stays visible.
 
+Declare an incident to track:
+
+```bash
+curl -X POST http://127.0.0.1:8000/incidents \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Ticketing integration failing repeatedly",
+    "severity": "high",
+    "event_ids": ["e17", "e18", "e19"]
+  }'
+```
+
+The service answers `201 Created` with the stored incident. It has gained the
+`id` a caller reads it back by, its lifecycle `status` starts at `open`, and the
+timestamps are set at declaration:
+
+```json
+{
+  "id": "b3f1c2d4e5a6470897a1b2c3d4e5f6a7",
+  "title": "Ticketing integration failing repeatedly",
+  "status": "open",
+  "severity": "high",
+  "opened_at": "2026-07-29T18:00:00Z",
+  "updated_at": "2026-07-29T18:00:00Z",
+  "resolved_at": null,
+  "event_ids": ["e17", "e18", "e19"],
+  "is_active": true,
+  "is_terminal": false
+}
+```
+
+The body carries the parts a person decides: the `title`, the `severity` and the
+source `event_ids` behind the incident. The service assigns the identifier and
+the timestamps and starts the incident `open`, so those are not part of the
+request, and a body that does not satisfy the contract (no events, a blank or
+repeated id, an unknown field) is rejected with `422` and nothing is stored.
+
+List tracked incidents, most recently opened first:
+
+```bash
+curl 'http://127.0.0.1:8000/incidents?status=open&limit=20&offset=0'
+```
+
+The service answers `200 OK` with a page of incidents and the total number of
+matches, so a caller can tell whether more pages remain:
+
+```json
+{
+  "total": 3,
+  "limit": 20,
+  "offset": 0,
+  "incidents": [
+    { "id": "b3f1c2d4e5a6470897a1b2c3d4e5f6a7", "title": "Ticketing integration failing repeatedly", "status": "open", "...": "..." }
+  ]
+}
+```
+
+The `status` filter is optional and matches the lifecycle state exactly; `limit`
+defaults to 50 and holds between 1 and 500, and `offset` skips that many matches
+before the page begins. A malformed filter or page parameter is rejected with
+`422` rather than silently ignored.
+
+Retrieve a single incident by its identifier:
+
+```bash
+curl http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7
+```
+
+The service answers `200 OK` with the stored incident, exactly as a listing
+would report it. An identifier that matches no stored incident is answered with
+`404`, naming the identifier, so a caller can tell a missing incident from an
+empty one.
+
 Further endpoints are documented here as they are built.
 
 ## Event Schema
@@ -575,8 +653,9 @@ as JSON, which keeps numbers, booleans and nulls the types they arrived as.
 Storing an event under an identifier already in use raises
 `DuplicateEventIdError` rather than overwriting stored history.
 
-The running application opens one store when it starts and closes it when it
-stops, so requests share a single connection. Access is guarded by a lock,
+The running application opens the event store and the incident store when it
+starts, both against the same configured database, and closes them when it
+stops, so requests share a connection per store. Access is guarded by a lock,
 because a SQLite connection is not safe to share across the threads FastAPI
 runs synchronous handlers in. `list_events` and `count` take the same optional
 column filters, so a filtered listing and its total stay in step. `add_or_get`
@@ -1131,6 +1210,18 @@ deterministic picture is still returned with an empty summary and a note recordi
 which gap occurred, and an outage records the provider that was asked as the
 model.
 
+### API endpoints
+
+Incidents are declared and read over HTTP. `POST /incidents` declares an incident
+from a posted title, severity and source events, assigns it an identifier and the
+opening timestamps, starts it `open` and stores it. `GET /incidents` lists the
+stored incidents most recently opened first, filtered by lifecycle status and
+paginated, alongside the total match count. `GET /incidents/{incident_id}` returns
+one stored incident, or 404 when no incident carries that identifier. The router
+stays thin: it validates the request and hands the store to the service, which
+declares or reads. The application opens the incident store alongside the event
+store when it starts. Examples are shown under [API Examples](#api-examples).
+
 ## Development Commands
 
 ```bash
@@ -1220,8 +1311,8 @@ started only once the API and core services are stable.
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Done |
-| AI-044 | Add incident API endpoints | Incident intelligence | In Progress |
-| AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
+| AI-044 | Add incident API endpoints | Incident intelligence | Done |
+| AI-045 | Add incident-resolution notes | Incident intelligence | Ready |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
@@ -1246,10 +1337,9 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. The next Ready ticket is AI-044 (add incident
-API endpoints): declaring incidents from events (AI-047) now gives the endpoints
-something to expose. AI-045 (incident-resolution notes) stays in Backlog until
-the endpoints from AI-044 land. When a ticket's dependencies are complete,
+No tickets are currently blocked. The next Ready ticket is AI-045 (add
+incident-resolution notes): the incident endpoints from AI-044 now give it
+somewhere to record a resolution. When a ticket's dependencies are complete,
 promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
@@ -1261,6 +1351,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
 - 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
 - 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
 - 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
@@ -1274,8 +1365,6 @@ it is not picked up and left half-finished.
 - 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
 - 2026-08-09 — Added deterministic daily-brief context assembly: `build_brief_context` gathers the current risks, a bounded recent-events view, incompleteness notes and the source event IDs a brief traces back to, without a model.
 - 2026-08-08 — Added a deterministic fake AI provider with scripted and echoed completions, and a `create_provider` factory that selects the provider named by `OPSBRIEF_AI_PROVIDER`.
-- 2026-08-08 — Added the AI provider interface: a bounded completion request/response contract and an `AIProvider` protocol, used only to turn assembled material into prose and never to decide risks.
-- 2026-08-07 — Added the `GET /risks` endpoint: it runs every rule over the stored events and returns the current risks most urgent first, with the instant the snapshot was judged.
 
 ## Future Game Center Integration
 
