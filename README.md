@@ -131,6 +131,12 @@ produced it.
   an event link) so a tracked incident survives a restart, and reading them back
   by id or as a most-recently-opened-first listing filtered by status, with the
   ordered source event IDs preserved.
+- Declaring incidents from stored events: `declare_incident_from_risk` opens an
+  incident from a risk, carrying its title, mapped severity and cited events, and
+  `declare_incidents_from_events` runs the canonical risk rules over the stored
+  events and opens one incident per recognised risk, most urgent first, so the
+  events a rule already grouped become a trackable incident without a model
+  re-deciding what belongs together.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -1026,6 +1032,35 @@ The events come back in the order the incident cites them, and every cited
 identifier is accounted for exactly once — either as a resolved event or as a
 missing ID — so a gap in the evidence is stated plainly rather than passed over.
 
+### Declaring from events
+
+An incident does not appear from nothing: it is declared from the events behind
+one disruption. A risk already groups those events, so declaring an incident
+from a risk carries that grouping forward into a stateful record without a model
+and without re-deciding what belongs together. The risk's title, severity and
+cited events become the incident's, so it traces back to exactly the events the
+rule fired on.
+
+```python
+from opsbrief.incidents import declare_incident_from_risk, declare_incidents_from_events
+
+incident = declare_incident_from_risk(risk, at=now)  # risk: a detected Risk
+incident.status  # IncidentStatus.OPEN
+incident.event_ids  # the risk's cited events, in cited order
+
+incidents = declare_incidents_from_events(events, at=now)  # events: stored Events
+```
+
+`declare_incident_from_risk` maps one risk to a freshly opened incident, and
+`declare_incidents_from_events` runs the canonical risk rules over the stored
+events and opens one incident per recognised risk, ranked most urgent first so
+the result reads in the same priority order the risks do. The risk severities map
+one to one onto incident severities, both running `low` to `critical`. The
+detection and every incident it seeds share one reference instant, so the same
+events always yield the same incidents. Events that raise no risk produce no
+incident. Nothing is stored: the functions return the incidents they open and
+leave the caller to persist whichever it wants to track with `IncidentStore`.
+
 ### Timelines
 
 An incident cites its events in the order they were linked, which is not
@@ -1185,10 +1220,10 @@ started only once the API and core services are stable.
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Done |
-| AI-044 | Add incident API endpoints | Incident intelligence | Backlog |
+| AI-044 | Add incident API endpoints | Incident intelligence | Ready |
 | AI-045 | Add incident-resolution notes | Incident intelligence | Backlog |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
-| AI-047 | Declare incidents from stored events | Incident intelligence | In Progress |
+| AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Backlog |
 | AI-052 | Add source references to generated output | Safety and explainability | Backlog |
@@ -1211,12 +1246,11 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. The next Ready ticket is AI-047 (declare
-incidents from stored events): incident persistence (AI-046) now gives it
-somewhere to store what it declares. The other Phase 4 tickets stay in Backlog
-until the work they build on lands. AI-044 needs the declaration from AI-047,
-and AI-045 needs the endpoints from AI-044. When a ticket's dependencies are
-complete, promote it to Ready so the next change has a clear starting point.
+No tickets are currently blocked. The next Ready ticket is AI-044 (add incident
+API endpoints): declaring incidents from events (AI-047) now gives the endpoints
+something to expose. AI-045 (incident-resolution notes) stays in Backlog until
+the endpoints from AI-044 land. When a ticket's dependencies are complete,
+promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1227,6 +1261,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
 - 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
 - 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
 - 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
