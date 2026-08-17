@@ -348,6 +348,33 @@ class IncidentDeclaration(BaseModel):
         return _check_distinct_nonblank_ids(value)
 
 
+class IncidentResolution(BaseModel):
+    """A request to resolve a tracked incident, optionally recording how.
+
+    This is the body a caller posts to move an incident to ``resolved``. The
+    ``note`` is optional but recommended: it explains how the incident was put
+    right and is carried into the incident's record and its summary. A blank note
+    is treated as none. Unknown fields are rejected so a mistyped body fails
+    loudly rather than being silently dropped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str | None = Field(
+        default=None,
+        max_length=MAX_RESOLUTION_NOTE_LENGTH,
+        description="How the incident was resolved; optional but recommended.",
+    )
+
+    @field_validator("note")
+    @classmethod
+    def _normalise_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
 class IncidentQuery(BaseModel):
     """Filters and pagination for listing stored incidents.
 

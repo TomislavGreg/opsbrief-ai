@@ -16,8 +16,15 @@ from opsbrief.incidents import (
     IncidentDeclaration,
     IncidentPage,
     IncidentQuery,
+    IncidentResolution,
+    InvalidIncidentTransition,
 )
-from opsbrief.services import declare_incident, get_incident, list_incidents
+from opsbrief.services import (
+    declare_incident,
+    get_incident,
+    list_incidents,
+    resolve_incident,
+)
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -82,3 +89,43 @@ def create_incident(declaration: IncidentDeclaration, store: IncidentStoreDepend
     returned with 201, so a caller can track it and read it back by that id.
     """
     return declare_incident(store, declaration, datetime.now(UTC))
+
+
+@router.post(
+    "/{incident_id}/resolution",
+    response_model=Incident,
+    summary="Resolve a tracked incident",
+    response_description="The stored incident, now resolved, with any resolution note recorded.",
+    responses={
+        404: {"description": "No incident is stored under the requested identifier."},
+        409: {"description": "The incident cannot move to resolved from its current state."},
+    },
+)
+def resolve_tracked_incident(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    resolution: IncidentResolution,
+    store: IncidentStoreDependency,
+) -> Incident:
+    """Resolve the incident with ``incident_id``, recording the optional note.
+
+    The incident is moved to ``resolved`` now and saved. A body that does not
+    satisfy the contract is rejected with 422. An identifier that matches no
+    stored incident is answered with 404, and an incident that cannot move to
+    ``resolved`` (already resolved or closed) is answered with 409, so a caller
+    can tell a missing incident from one already past resolving.
+    """
+    try:
+        incident = resolve_incident(store, incident_id, resolution, datetime.now(UTC))
+    except InvalidIncidentTransition as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return incident

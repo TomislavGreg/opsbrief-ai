@@ -18,11 +18,13 @@ from opsbrief.incidents.linking import IncidentEvents, resolve_incident_events
 from opsbrief.incidents.schema import (
     DEFAULT_INCIDENT_PAGE_SIZE,
     MAX_INCIDENT_PAGE_SIZE,
+    MAX_RESOLUTION_NOTE_LENGTH,
     Incident,
     IncidentClosedError,
     IncidentDeclaration,
     IncidentPage,
     IncidentQuery,
+    IncidentResolution,
     IncidentSeverity,
 )
 from opsbrief.incidents.summary import (
@@ -47,6 +49,7 @@ __all__ = [
     "INCIDENT_SUMMARY_PROMPT_VERSION",
     "MAX_INCIDENT_PAGE_SIZE",
     "MAX_INCIDENT_SUMMARY_LENGTH",
+    "MAX_RESOLUTION_NOTE_LENGTH",
     "RISK_TO_INCIDENT_SEVERITY",
     "TERMINAL_STATUSES",
     "Incident",
@@ -55,6 +58,7 @@ __all__ = [
     "IncidentEvents",
     "IncidentPage",
     "IncidentQuery",
+    "IncidentResolution",
     "IncidentSeverity",
     "IncidentStatus",
     "IncidentSummary",

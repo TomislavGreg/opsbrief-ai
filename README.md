@@ -142,6 +142,12 @@ produced it.
   incidents most recently opened first, filtered by status and paginated; and
   `GET /incidents/{incident_id}` returns a single stored incident, or 404 when no
   incident carries that identifier.
+- Incident resolution notes: an incident can be resolved with an optional
+  operator note explaining how it was put right, over
+  `POST /incidents/{incident_id}/resolution`. The note is kept with the incident
+  (absent while it is active, cleared if it reopens) and carried into the
+  incident summary, so a reader sees how the disruption was resolved. Resolving an
+  incident already past resolving is refused rather than silently reapplied.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -574,6 +580,40 @@ The service answers `200 OK` with the stored incident, exactly as a listing
 would report it. An identifier that matches no stored incident is answered with
 `404`, naming the identifier, so a caller can tell a missing incident from an
 empty one.
+
+Resolve a tracked incident, recording how it was put right:
+
+```bash
+curl -X POST http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7/resolution \
+  -H 'Content-Type: application/json' \
+  -d '{ "note": "Restarted the ticketing sync and confirmed recovery." }'
+```
+
+The service answers `200 OK` with the incident moved to `resolved`, its
+`resolved_at` set and the `resolution_note` recorded:
+
+```json
+{
+  "id": "b3f1c2d4e5a6470897a1b2c3d4e5f6a7",
+  "title": "Ticketing integration failing repeatedly",
+  "status": "resolved",
+  "severity": "high",
+  "opened_at": "2026-07-29T18:00:00Z",
+  "updated_at": "2026-07-29T19:30:00Z",
+  "resolved_at": "2026-07-29T19:30:00Z",
+  "resolution_note": "Restarted the ticketing sync and confirmed recovery.",
+  "event_ids": ["e17", "e18", "e19"],
+  "is_active": false,
+  "is_terminal": false
+}
+```
+
+The `note` is optional: a resolution with no note, or a blank one, still resolves
+the incident and leaves `resolution_note` null. An identifier that matches no
+stored incident is answered with `404`, and an incident that cannot move to
+`resolved` (one already resolved or closed) is answered with `409` rather than
+silently reapplied, so a caller can tell a missing incident from one already past
+resolving.
 
 Further endpoints are documented here as they are built.
 
@@ -1051,8 +1091,9 @@ incident = Incident.declare(
 
 incident.status  # IncidentStatus.OPEN
 working = incident.transition_to(IncidentStatus.INVESTIGATING, at=now)
-resolved = working.transition_to(IncidentStatus.RESOLVED, at=now)
+resolved = working.transition_to(IncidentStatus.RESOLVED, at=now, note="Restarted the sync.")
 resolved.resolved_at  # the instant it stopped being active
+resolved.resolution_note  # "Restarted the sync."
 resolved.is_active  # False
 ```
 
@@ -1061,7 +1102,12 @@ it traces back to real evidence exactly as a risk does. It records three instant
 `opened_at`, fixed when the incident is declared; `updated_at`, which advances on
 every change; and `resolved_at`, set the moment the incident stops being active
 and cleared again if it is reopened, so the resolution instant never disagrees
-with the state.
+with the state. Alongside `resolved_at` it may carry a `resolution_note`, a short
+operator explanation of how it was put right: it is attached when the incident
+moves to an inactive state, kept when moving from `resolved` to `closed`, and
+cleared on reopening, so like the instant it never disagrees with the state. A
+note given on a reopening is refused, since an incident coming back is not being
+resolved.
 
 The lifecycle has five states. An incident is *active* while it is still being
 worked — `open` (declared, unclaimed), `investigating` (actively worked) and
@@ -1187,6 +1233,7 @@ summary = generate_incident_summary(incident, events, create_provider())
 summary.summary  # the incident in prose, phrased by the model
 summary.status  # where the incident sits in its lifecycle
 summary.severity  # how serious it is
+summary.resolution_note  # how it was resolved, when it carries a note
 summary.started_at, summary.ended_at  # the span its cited events ran over
 summary.source_event_ids  # the incident's cited events, in cited order
 summary.missing_event_ids  # cited IDs no stored event answered to
@@ -1217,10 +1264,15 @@ from a posted title, severity and source events, assigns it an identifier and th
 opening timestamps, starts it `open` and stores it. `GET /incidents` lists the
 stored incidents most recently opened first, filtered by lifecycle status and
 paginated, alongside the total match count. `GET /incidents/{incident_id}` returns
-one stored incident, or 404 when no incident carries that identifier. The router
-stays thin: it validates the request and hands the store to the service, which
-declares or reads. The application opens the incident store alongside the event
-store when it starts. Examples are shown under [API Examples](#api-examples).
+one stored incident, or 404 when no incident carries that identifier.
+`POST /incidents/{incident_id}/resolution` moves a tracked incident to `resolved`
+and records an optional note explaining how it was put right, saving the change;
+it answers 404 when no incident carries the identifier and 409 when the incident
+cannot move to `resolved` from its current state. The router stays thin: it
+validates the request and hands the store to the service, which declares, reads
+or resolves. The transition and note rules stay in the incident model, not the
+router. The application opens the incident store alongside the event store when
+it starts. Examples are shown under [API Examples](#api-examples).
 
 ## Development Commands
 
@@ -1312,10 +1364,10 @@ started only once the API and core services are stable.
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Done |
 | AI-044 | Add incident API endpoints | Incident intelligence | Done |
-| AI-045 | Add incident-resolution notes | Incident intelligence | In Progress |
+| AI-045 | Add incident-resolution notes | Incident intelligence | Done |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
-| AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
+| AI-050 | Add sensitive-field redaction | Safety and explainability | Ready |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Backlog |
 | AI-052 | Add source references to generated output | Safety and explainability | Backlog |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Backlog |
@@ -1337,10 +1389,12 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. The next Ready ticket is AI-045 (add
-incident-resolution notes): the incident endpoints from AI-044 now give it
-somewhere to record a resolution. When a ticket's dependencies are complete,
-promote it to Ready so the next change has a clear starting point.
+No tickets are currently blocked. Phase 4 (Incident intelligence) is complete.
+The next Ready ticket is AI-050 (add sensitive-field redaction), which opens
+Phase 5: with events, briefs and incidents in place, the next concern is keeping
+sensitive fields out of what the service stores and shows. When a ticket's
+dependencies are complete, promote it to Ready so the next change has a clear
+starting point.
 
 ### Maintaining the CI workflow
 
@@ -1351,6 +1405,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
 - 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
 - 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
 - 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
@@ -1364,7 +1419,6 @@ it is not picked up and left half-finished.
 - 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
 - 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
 - 2026-08-09 — Added deterministic daily-brief context assembly: `build_brief_context` gathers the current risks, a bounded recent-events view, incompleteness notes and the source event IDs a brief traces back to, without a model.
-- 2026-08-08 — Added a deterministic fake AI provider with scripted and echoed completions, and a `create_provider` factory that selects the provider named by `OPSBRIEF_AI_PROVIDER`.
 
 ## Future Game Center Integration
 
