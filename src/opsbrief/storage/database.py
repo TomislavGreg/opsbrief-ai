@@ -32,19 +32,27 @@ CREATE INDEX IF NOT EXISTS events_occurred_at_idx ON events (occurred_at);
 CREATE INDEX IF NOT EXISTS events_source_external_id_idx ON events (source, external_id);
 
 CREATE TABLE IF NOT EXISTS incidents (
-    id           TEXT PRIMARY KEY,
-    title        TEXT NOT NULL,
-    status       TEXT NOT NULL,
-    severity     TEXT NOT NULL,
-    opened_at    TEXT NOT NULL,
-    updated_at   TEXT NOT NULL,
-    resolved_at  TEXT,
-    event_ids    TEXT NOT NULL
+    id              TEXT PRIMARY KEY,
+    title           TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    opened_at       TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    resolved_at     TEXT,
+    resolution_note TEXT,
+    event_ids       TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS incidents_opened_at_idx ON incidents (opened_at);
 CREATE INDEX IF NOT EXISTS incidents_status_idx ON incidents (status);
 """
+
+#: Columns added to a table after its first release. A database created by an
+#: earlier version already has the table but not these columns, and
+#: ``CREATE TABLE IF NOT EXISTS`` will not add them, so they are filled in
+#: separately. Each entry is ``(table, column, declaration)``; the names are
+#: fixed here, never taken from caller data.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (("incidents", "resolution_note", "TEXT"),)
 
 
 def database_path(database_url: str) -> str:
@@ -79,6 +87,20 @@ def connect(database_url: str) -> sqlite3.Connection:
 
 
 def create_schema(connection: sqlite3.Connection) -> None:
-    """Create the tables and indexes the service needs, if they are absent."""
+    """Create the tables and indexes the service needs, if they are absent.
+
+    Columns introduced after a table's first release are added afterwards, so a
+    database created by an earlier version gains them rather than failing when a
+    query names a column its table does not have.
+    """
     with connection:
         connection.executescript(SCHEMA)
+        _add_missing_columns(connection)
+
+
+def _add_missing_columns(connection: sqlite3.Connection) -> None:
+    """Add any :data:`_ADDED_COLUMNS` a pre-existing table is missing."""
+    for table, column, declaration in _ADDED_COLUMNS:
+        present = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in present:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")

@@ -73,6 +73,26 @@ def test_structured_facts_are_carried_from_the_incident_not_the_model() -> None:
     assert result.ended_at == NOW - timedelta(minutes=10)
 
 
+def test_summary_carries_the_incidents_resolution_note() -> None:
+    provider = FakeAIProvider(responses=["The webhook failed and was then restarted."])
+    incident = make_incident(["e1"]).transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="Restarted the ticketing sync."
+    )
+
+    result = generate_incident_summary(incident, [make_event("e1")], provider)
+
+    assert result.status is IncidentStatus.RESOLVED
+    assert result.resolution_note == "Restarted the ticketing sync."
+
+
+def test_summary_has_no_resolution_note_for_an_active_incident() -> None:
+    provider = FakeAIProvider(responses=["Still failing."])
+
+    result = generate_incident_summary(make_incident(["e1"]), [make_event("e1")], provider)
+
+    assert result.resolution_note is None
+
+
 def test_generated_summary_records_the_prompt_and_output_versions() -> None:
     provider = FakeAIProvider(responses=["A summary."])
 

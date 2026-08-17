@@ -59,9 +59,10 @@ class IncidentSummary(BaseModel):
     it. Only the ``summary`` comes from a language model, and it is treated as
     untrusted: it is constrained to a bounded length and carries no authority to
     invent an event or move the incident. Everything else is carried straight from
-    the incident and its timeline: ``title``, ``status`` and ``severity`` from the
-    incident, ``started_at`` and ``ended_at`` from the timeline span,
-    ``source_event_ids`` from the incident's cited evidence in cited order, and
+    the incident and its timeline: ``title``, ``status``, ``severity`` and
+    ``resolution_note`` from the incident, ``started_at`` and ``ended_at`` from the
+    timeline span, ``source_event_ids`` from the incident's cited evidence in cited
+    order, and
     ``missing_event_ids`` from any cited identifier no stored event answered to. So
     a model can rephrase the picture but never change what it says. ``model`` names
     the model that produced the summary, so a generated statement traces to its
@@ -88,6 +89,10 @@ class IncidentSummary(BaseModel):
     )
     severity: IncidentSeverity = Field(
         description="How serious the incident is, carried over unchanged.",
+    )
+    resolution_note: str | None = Field(
+        default=None,
+        description="How the incident was resolved, carried over unchanged; absent while active.",
     )
     summary: str = Field(
         max_length=MAX_INCIDENT_SUMMARY_LENGTH,
@@ -185,6 +190,8 @@ def render_incident_material(incident: Incident, timeline: IncidentTimeline) -> 
     receives is always well-formed. The span is stated from the timeline, so the
     model is shown the same start and end a reader would see, and missing cited
     events are noted so the model is not misled into implying a complete picture.
+    A resolution note, when the incident carries one, is shown too, so the model
+    can phrase how the incident was put right.
     """
     span = "no cited events resolved to a stored record"
     if timeline.started_at is not None and timeline.ended_at is not None:
@@ -199,6 +206,8 @@ def render_incident_material(incident: Incident, timeline: IncidentTimeline) -> 
             "Timeline (oldest first)", [_render_entry(entry) for entry in timeline.entries]
         ),
     ]
+    if incident.resolution_note is not None:
+        lines += ["", f"Resolution: {incident.resolution_note}"]
     if timeline.missing_event_ids:
         missing = len(timeline.missing_event_ids)
         lines += [
@@ -278,6 +287,7 @@ def generate_incident_summary(
         title=incident.title,
         status=incident.status,
         severity=incident.severity,
+        resolution_note=incident.resolution_note,
         summary=summary,
         model=model,
         output_version=INCIDENT_SUMMARY_OUTPUT_VERSION,

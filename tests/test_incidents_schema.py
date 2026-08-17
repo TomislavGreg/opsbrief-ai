@@ -189,6 +189,107 @@ def test_reopening_a_resolved_incident_clears_the_resolution_instant() -> None:
     assert incident.is_active is True
 
 
+def test_resolving_records_a_resolution_note() -> None:
+    incident = make_incident().transition_to(
+        IncidentStatus.RESOLVED,
+        at=OPENED + timedelta(hours=2),
+        note="Restarted the ticketing sync.",
+    )
+
+    assert incident.status is IncidentStatus.RESOLVED
+    assert incident.resolution_note == "Restarted the ticketing sync."
+
+
+def test_a_resolution_note_is_optional() -> None:
+    incident = make_incident().transition_to(
+        IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=1)
+    )
+
+    assert incident.status is IncidentStatus.RESOLVED
+    assert incident.resolution_note is None
+
+
+def test_a_blank_resolution_note_is_treated_as_none() -> None:
+    incident = make_incident().transition_to(
+        IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=1), note="   "
+    )
+
+    assert incident.resolution_note is None
+
+
+def test_a_resolution_note_is_trimmed() -> None:
+    incident = make_incident().transition_to(
+        IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=1), note="  cleared the backlog  "
+    )
+
+    assert incident.resolution_note == "cleared the backlog"
+
+
+def test_closing_a_resolved_incident_keeps_its_resolution_note() -> None:
+    incident = (
+        make_incident()
+        .transition_to(IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=2), note="Fixed.")
+        .transition_to(IncidentStatus.CLOSED, at=OPENED + timedelta(hours=5))
+    )
+
+    assert incident.resolution_note == "Fixed."
+
+
+def test_closing_with_a_new_note_replaces_the_earlier_one() -> None:
+    incident = (
+        make_incident()
+        .transition_to(IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=2), note="Mitigated.")
+        .transition_to(IncidentStatus.CLOSED, at=OPENED + timedelta(hours=5), note="Signed off.")
+    )
+
+    assert incident.resolution_note == "Signed off."
+
+
+def test_reopening_a_resolved_incident_clears_its_resolution_note() -> None:
+    incident = (
+        make_incident()
+        .transition_to(IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=2), note="Fixed.")
+        .transition_to(IncidentStatus.INVESTIGATING, at=OPENED + timedelta(hours=4))
+    )
+
+    assert incident.status is IncidentStatus.INVESTIGATING
+    assert incident.resolution_note is None
+
+
+def test_a_note_cannot_be_recorded_when_reopening() -> None:
+    resolved = make_incident().transition_to(
+        IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=2)
+    )
+
+    with pytest.raises(ValueError, match="reopening"):
+        resolved.transition_to(
+            IncidentStatus.INVESTIGATING, at=OPENED + timedelta(hours=4), note="x"
+        )
+
+
+def test_an_over_long_resolution_note_is_refused() -> None:
+    with pytest.raises(ValueError, match="at most"):
+        make_incident().transition_to(
+            IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=1), note="x" * 2_001
+        )
+
+
+def test_an_active_incident_may_not_carry_a_resolution_note() -> None:
+    with pytest.raises(ValidationError) as error:
+        Incident(
+            id="inc-1",
+            title="x",
+            status=IncidentStatus.OPEN,
+            severity=IncidentSeverity.LOW,
+            opened_at=OPENED,
+            updated_at=OPENED,
+            resolution_note="not allowed while active",
+            event_ids=["e1"],
+        )
+
+    assert "resolution_note" in str(error.value)
+
+
 def test_a_disallowed_transition_raises_and_changes_nothing() -> None:
     resolved = make_incident().transition_to(IncidentStatus.CLOSED, at=OPENED + timedelta(hours=1))
 

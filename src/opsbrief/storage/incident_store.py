@@ -24,6 +24,7 @@ _COLUMNS = (
     "opened_at",
     "updated_at",
     "resolved_at",
+    "resolution_note",
     "event_ids",
 )
 
@@ -69,6 +70,7 @@ def _to_row(incident: Incident) -> dict[str, object]:
         "resolved_at": (
             None if incident.resolved_at is None else format_timestamp(incident.resolved_at)
         ),
+        "resolution_note": incident.resolution_note,
         "event_ids": json.dumps(incident.event_ids),
     }
 
@@ -84,6 +86,7 @@ def _from_row(row: sqlite3.Row) -> Incident:
         opened_at=parse_timestamp(row["opened_at"]),
         updated_at=parse_timestamp(row["updated_at"]),
         resolved_at=None if resolved_at is None else parse_timestamp(resolved_at),
+        resolution_note=row["resolution_note"],
         event_ids=json.loads(row["event_ids"]),
     )
 

@@ -6,6 +6,7 @@ from opsbrief.events import Event, EventInput
 from opsbrief.incidents import (
     Incident,
     IncidentSeverity,
+    IncidentStatus,
     build_incident_timeline,
 )
 from opsbrief.incidents.summary import render_incident_material
@@ -64,6 +65,26 @@ def test_render_states_the_span_from_the_timeline() -> None:
     started = (NOW - timedelta(minutes=90)).isoformat()
     ended = (NOW - timedelta(minutes=10)).isoformat()
     assert f"Span: {started} to {ended}" in rendered
+
+
+def test_render_states_the_resolution_note_when_present() -> None:
+    events = [make_event("e1", minutes_ago=20)]
+    incident = make_incident(["e1"]).transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="Restarted the ticketing sync."
+    )
+
+    rendered = render_incident_material(incident, build_incident_timeline(incident, events))
+
+    assert "Resolution: Restarted the ticketing sync." in rendered
+
+
+def test_render_omits_the_resolution_line_when_there_is_no_note() -> None:
+    events = [make_event("e1", minutes_ago=20)]
+    incident = make_incident(["e1"])
+
+    rendered = render_incident_material(incident, build_incident_timeline(incident, events))
+
+    assert "Resolution:" not in rendered
 
 
 def test_render_notes_cited_events_that_no_longer_resolve() -> None:
