@@ -1312,7 +1312,7 @@ started only once the API and core services are stable.
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
 | AI-043 | Generate AI incident summaries | Incident intelligence | Done |
 | AI-044 | Add incident API endpoints | Incident intelligence | Done |
-| AI-045 | Add incident-resolution notes | Incident intelligence | Ready |
+| AI-045 | Add incident-resolution notes | Incident intelligence | In Progress |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Backlog |
