@@ -15,6 +15,8 @@ from opsbrief.incidents import (
     IncidentDeclaration,
     IncidentPage,
     IncidentQuery,
+    IncidentResolution,
+    IncidentStatus,
 )
 from opsbrief.storage import IncidentStore
 
@@ -36,6 +38,29 @@ def declare_incident(
         at=as_utc(now),
     )
     return store.add(incident)
+
+
+def resolve_incident(
+    store: IncidentStore,
+    incident_id: str,
+    resolution: IncidentResolution,
+    now: datetime,
+) -> Incident | None:
+    """Resolve the stored incident with ``incident_id`` and persist the change.
+
+    The incident is moved to ``resolved`` at ``now`` with the optional note from
+    ``resolution`` recorded, then saved. Returns ``None`` when no incident carries
+    the identifier, so the caller can report a missing incident. An incident that
+    cannot move to ``resolved`` (already resolved or closed) raises
+    :class:`~opsbrief.incidents.InvalidIncidentTransition` from the incident model,
+    which the caller turns into a conflict; the transition rules stay in the
+    incident package, not here.
+    """
+    incident = store.get(incident_id)
+    if incident is None:
+        return None
+    resolved = incident.transition_to(IncidentStatus.RESOLVED, at=as_utc(now), note=resolution.note)
+    return store.save(resolved)
 
 
 def get_incident(store: IncidentStore, incident_id: str) -> Incident | None:

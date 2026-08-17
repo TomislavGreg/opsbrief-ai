@@ -8,10 +8,12 @@ from pydantic import ValidationError
 from opsbrief.incidents import (
     DEFAULT_INCIDENT_PAGE_SIZE,
     MAX_INCIDENT_PAGE_SIZE,
+    MAX_RESOLUTION_NOTE_LENGTH,
     Incident,
     IncidentDeclaration,
     IncidentPage,
     IncidentQuery,
+    IncidentResolution,
     IncidentSeverity,
     IncidentStatus,
 )
@@ -70,6 +72,30 @@ def test_a_declaration_rejects_unknown_fields() -> None:
 def test_a_declaration_carries_no_status_field() -> None:
     # The service starts every declared incident open, so the body cannot set it.
     assert "status" not in IncidentDeclaration.model_fields
+
+
+def test_a_resolution_defaults_to_no_note() -> None:
+    assert IncidentResolution().note is None
+
+
+def test_a_resolution_carries_and_trims_its_note() -> None:
+    resolution = IncidentResolution(note="  Restarted the sync.  ")
+
+    assert resolution.note == "Restarted the sync."
+
+
+def test_a_resolution_treats_a_blank_note_as_none() -> None:
+    assert IncidentResolution(note="   ").note is None
+
+
+def test_a_resolution_rejects_an_over_long_note() -> None:
+    with pytest.raises(ValidationError):
+        IncidentResolution(note="x" * (MAX_RESOLUTION_NOTE_LENGTH + 1))
+
+
+def test_a_resolution_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        IncidentResolution(status=IncidentStatus.RESOLVED)
 
 
 def test_a_query_defaults_to_no_filter_and_the_default_page() -> None:

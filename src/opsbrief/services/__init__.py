@@ -5,6 +5,7 @@ from opsbrief.services.incident_reporting import (
     declare_incident,
     get_incident,
     list_incidents,
+    resolve_incident,
 )
 from opsbrief.services.ingestion import record_event, record_events
 from opsbrief.services.retrieval import get_event, list_events
@@ -20,4 +21,5 @@ __all__ = [
     "record_event",
     "record_events",
     "report_daily_brief",
+    "resolve_incident",
 ]
