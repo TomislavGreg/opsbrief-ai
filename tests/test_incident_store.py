@@ -1,5 +1,6 @@
 """Tests for SQLite incident persistence."""
 
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +12,7 @@ from opsbrief.storage import (
     IncidentNotFoundError,
     IncidentStore,
 )
+from opsbrief.storage.database import create_schema
 
 OPENED_AT = datetime(2026, 7, 29, 9, 30, tzinfo=UTC)
 
@@ -61,6 +63,35 @@ def test_inactive_incident_round_trips(store: IncidentStore) -> None:
     assert stored.status is IncidentStatus.RESOLVED
     assert stored.resolved_at == OPENED_AT + timedelta(hours=2)
     assert stored.is_active is False
+
+
+def test_resolution_note_round_trips(store: IncidentStore) -> None:
+    resolved = make_incident().transition_to(
+        IncidentStatus.RESOLVED,
+        at=OPENED_AT + timedelta(hours=2),
+        note="Restarted the ticketing sync and confirmed recovery.",
+    )
+
+    store.add(resolved)
+    stored = store.get(resolved.id)
+
+    assert stored is not None
+    assert stored.resolution_note == "Restarted the ticketing sync and confirmed recovery."
+
+
+def test_save_persists_a_resolution_note(store: IncidentStore) -> None:
+    incident = make_incident()
+    store.add(incident)
+
+    resolved = incident.transition_to(
+        IncidentStatus.RESOLVED, at=OPENED_AT + timedelta(hours=1), note="Cleared the backlog."
+    )
+    store.save(resolved)
+    stored = store.get(incident.id)
+
+    assert stored is not None
+    assert stored.status is IncidentStatus.RESOLVED
+    assert stored.resolution_note == "Cleared the backlog."
 
 
 def test_event_id_order_is_preserved(store: IncidentStore) -> None:
@@ -164,3 +195,22 @@ def test_list_rejects_invalid_pagination(store: IncidentStore) -> None:
         store.list_incidents(limit=0)
     with pytest.raises(ValueError):
         store.list_incidents(offset=-1)
+
+
+def test_create_schema_adds_a_missing_resolution_note_column() -> None:
+    # A database created before resolution notes has the incidents table but not
+    # the column; create_schema must add it rather than leave queries to fail.
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        "CREATE TABLE incidents ("
+        "id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, "
+        "severity TEXT NOT NULL, opened_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+        "resolved_at TEXT, event_ids TEXT NOT NULL)"
+    )
+
+    create_schema(connection)
+
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(incidents)")}
+    assert "resolution_note" in columns
+    connection.close()

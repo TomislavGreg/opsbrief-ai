@@ -33,6 +33,11 @@ from opsbrief.incidents.lifecycle import (
 DEFAULT_INCIDENT_PAGE_SIZE = 50
 MAX_INCIDENT_PAGE_SIZE = 500
 
+#: Upper bound, in characters, on a resolution note. A note is a short operator
+#: explanation of how an incident was put right, not a free-form log, so it is
+#: length-limited like the rest of the contract.
+MAX_RESOLUTION_NOTE_LENGTH = 2_000
+
 
 def _check_distinct_nonblank_ids(value: list[str]) -> list[str]:
     """Reject blank or repeated identifiers so the evidence stays traceable.
@@ -87,7 +92,10 @@ class Incident(BaseModel):
     each one up. ``opened_at`` is fixed when the incident is declared;
     ``updated_at`` moves with every change; and ``resolved_at`` records when the
     incident stopped being active, set exactly when the status is inactive and
-    absent while it is still being worked.
+    absent while it is still being worked. ``resolution_note`` records how the
+    incident was put right: it may be attached when the incident moves to an
+    inactive state and, like ``resolved_at``, is absent while the incident is
+    active and cleared if it reopens.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -118,6 +126,11 @@ class Incident(BaseModel):
         default=None,
         description="When the incident stopped being active, set once it is resolved or closed.",
     )
+    resolution_note: str | None = Field(
+        default=None,
+        max_length=MAX_RESOLUTION_NOTE_LENGTH,
+        description="How the incident was resolved, recorded when it stops being active.",
+    )
     event_ids: list[str] = Field(
         min_length=1,
         description="Source event IDs behind the incident, in link order, distinct and non-blank.",
@@ -133,6 +146,19 @@ class Incident(BaseModel):
     def _normalise_optional_timestamp(cls, value: datetime | None) -> datetime | None:
         return None if value is None else as_utc(value)
 
+    @field_validator("resolution_note")
+    @classmethod
+    def _normalise_resolution_note(cls, value: str | None) -> str | None:
+        """Trim surrounding whitespace and treat a blank note as no note.
+
+        A note that is only whitespace says nothing, so it is stored as absent
+        rather than as an empty string that a reader would have to special-case.
+        """
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
     @field_validator("event_ids")
     @classmethod
     def _check_event_ids(cls, value: list[str]) -> list[str]:
@@ -142,15 +168,19 @@ class Incident(BaseModel):
     def _check_lifecycle_invariants(self) -> "Incident":
         """Keep the timestamps and the status consistent with each other.
 
-        An active incident has not stopped, so it carries no ``resolved_at``; an
-        inactive one has, so it must. Nothing may predate the incident's opening,
-        and its resolution cannot come before it opened.
+        An active incident has not stopped, so it carries neither a ``resolved_at``
+        nor a ``resolution_note``; an inactive one has stopped, so it must record
+        when (a note remains optional, since not every resolution is explained).
+        Nothing may predate the incident's opening, and its resolution cannot come
+        before it opened.
         """
         active = self.status in ACTIVE_STATUSES
         if active and self.resolved_at is not None:
             raise ValueError(f"an active incident ({self.status.value}) has no resolved_at")
         if not active and self.resolved_at is None:
             raise ValueError(f"an inactive incident ({self.status.value}) needs a resolved_at")
+        if active and self.resolution_note is not None:
+            raise ValueError(f"an active incident ({self.status.value}) has no resolution_note")
         if self.updated_at < self.opened_at:
             raise ValueError("updated_at cannot be before opened_at")
         if self.resolved_at is not None and self.resolved_at < self.opened_at:
@@ -201,7 +231,13 @@ class Incident(BaseModel):
             event_ids=event_ids,
         )
 
-    def transition_to(self, target: IncidentStatus, *, at: datetime | None = None) -> "Incident":
+    def transition_to(
+        self,
+        target: IncidentStatus,
+        *,
+        at: datetime | None = None,
+        note: str | None = None,
+    ) -> "Incident":
         """Return a copy of the incident moved to ``target``.
 
         The move must be one the lifecycle allows, or
@@ -209,18 +245,37 @@ class Incident(BaseModel):
         ``updated_at`` advances to ``at``; ``resolved_at`` is set when the move
         makes the incident inactive and cleared when it makes it active again, so
         the resolution instant always matches the state.
+
+        ``note`` records how the incident was put right. It is meaningful only for
+        a move to an inactive state: a blank note is treated as none, a note given
+        on a reopening raises ``ValueError`` (an incident coming back is not being
+        resolved), and moving from one inactive state to another (resolved to
+        closed) keeps the existing note unless a new one is given. Reopening clears
+        the note along with the resolution instant.
         """
         if not can_transition(self.status, target):
             raise InvalidIncidentTransition(self.status, target)
         moment = at or datetime.now(UTC)
+        cleaned_note = note.strip() if note is not None else ""
+        if len(cleaned_note) > MAX_RESOLUTION_NOTE_LENGTH:
+            raise ValueError(
+                f"a resolution note may be at most {MAX_RESOLUTION_NOTE_LENGTH} characters"
+            )
         if target in ACTIVE_STATUSES:
+            if cleaned_note:
+                raise ValueError("a resolution note cannot be recorded when reopening an incident")
             resolved_at = None
-        elif self.resolved_at is not None:
-            resolved_at = self.resolved_at
+            resolution_note = None
         else:
-            resolved_at = moment
+            resolved_at = self.resolved_at if self.resolved_at is not None else moment
+            resolution_note = cleaned_note or self.resolution_note
         return self.model_copy(
-            update={"status": target, "updated_at": moment, "resolved_at": resolved_at}
+            update={
+                "status": target,
+                "updated_at": moment,
+                "resolved_at": resolved_at,
+                "resolution_note": resolution_note,
+            }
         )
 
     def link_events(self, event_ids: list[str], *, at: datetime | None = None) -> "Incident":
