@@ -6,11 +6,19 @@ or as a batch. A submission that carries an ``external_id`` already seen from
 the same source is recognised as a resubmission rather than stored again.
 """
 
+from collections.abc import Iterable
+
 from opsbrief.events import Event, EventBatch, EventBatchResult, EventInput
+from opsbrief.redaction import DEFAULT_SENSITIVE_KEYS, redact_event_input
 from opsbrief.storage import EventStore
 
 
-def record_event(store: EventStore, payload: EventInput) -> tuple[Event, bool]:
+def record_event(
+    store: EventStore,
+    payload: EventInput,
+    *,
+    sensitive_keys: Iterable[str] = DEFAULT_SENSITIVE_KEYS,
+) -> tuple[Event, bool]:
     """Store a submitted event, or recognise it as a resubmission.
 
     Returns the stored event and whether it was newly stored. A submission
@@ -19,16 +27,23 @@ def record_event(store: EventStore, payload: EventInput) -> tuple[Event, bool]:
     nothing new is stored, so an at-least-once producer that retries does not
     create a duplicate. A submission with no ``external_id`` is always stored.
 
-    The stored form carries the service-assigned ``id`` that generated briefs,
-    risks and incidents cite, and the ``received_at`` timestamp recording when
-    the service first accepted it.
+    Sensitive metadata values are masked before the event is stored, so a value
+    named by ``sensitive_keys`` never reaches the database. The stored form
+    carries the service-assigned ``id`` that generated briefs, risks and
+    incidents cite, and the ``received_at`` timestamp recording when the service
+    first accepted it.
     """
-    event = Event.from_input(payload)
+    event = Event.from_input(redact_event_input(payload, sensitive_keys))
     stored = store.add_or_get(event)
     return stored, stored.id == event.id
 
 
-def record_events(store: EventStore, batch: EventBatch) -> EventBatchResult:
+def record_events(
+    store: EventStore,
+    batch: EventBatch,
+    *,
+    sensitive_keys: Iterable[str] = DEFAULT_SENSITIVE_KEYS,
+) -> EventBatchResult:
     """Store a validated batch of events atomically and return their stored forms.
 
     Each event is assigned its own identity. A submission carrying an
@@ -39,12 +54,15 @@ def record_events(store: EventStore, batch: EventBatch) -> EventBatchResult:
     duplicates. The batch is stored all-or-nothing: if any identifier clashes
     with a stored event, none of the batch is kept.
 
-    The result returns one event per submitted event, in order, and its
+    Sensitive metadata values are masked before storage, exactly as for a single
+    event. The result returns one event per submitted event, in order, and its
     ``count`` reports how many were newly stored; the remainder were recognised
     as resubmissions and can be told apart because their ``id`` predates the
     request.
     """
-    events = [Event.from_input(payload) for payload in batch.events]
+    events = [
+        Event.from_input(redact_event_input(payload, sensitive_keys)) for payload in batch.events
+    ]
     resolved = store.add_all_or_get(events)
     stored = sum(1 for event, result in zip(events, resolved, strict=True) if result.id == event.id)
     return EventBatchResult(count=stored, events=resolved)

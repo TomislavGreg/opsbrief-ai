@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Response, status
 
-from opsbrief.api.dependencies import EventStoreDependency
+from opsbrief.api.dependencies import EventStoreDependency, SensitiveMetadataKeysDependency
 from opsbrief.events import (
     Event,
     EventBatch,
@@ -68,16 +68,22 @@ def read_event(
         200: {"description": "The event was recognised as a resubmission and not stored again."}
     },
 )
-def create_event(payload: EventInput, store: EventStoreDependency, response: Response) -> Event:
+def create_event(
+    payload: EventInput,
+    store: EventStoreDependency,
+    sensitive_keys: SensitiveMetadataKeysDependency,
+    response: Response,
+) -> Event:
     """Accept one operational event and store it.
 
     A payload that does not satisfy the event contract is rejected with 422
     and nothing is stored. A submission whose ``external_id`` the same source
     has already sent is recognised as a resubmission: the originally stored
     event is returned with 200 rather than stored again, so retrying a delivery
-    is safe. A newly stored event is returned with 201.
+    is safe. A newly stored event is returned with 201. Sensitive metadata
+    values are masked before storage.
     """
-    event, created = record_event(store, payload)
+    event, created = record_event(store, payload, sensitive_keys=sensitive_keys)
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return event
 
@@ -89,11 +95,16 @@ def create_event(payload: EventInput, store: EventStoreDependency, response: Res
     summary="Record a batch of operational events",
     response_description="The stored events, with their service-assigned identifiers.",
 )
-def create_events(batch: EventBatch, store: EventStoreDependency) -> EventBatchResult:
+def create_events(
+    batch: EventBatch,
+    store: EventStoreDependency,
+    sensitive_keys: SensitiveMetadataKeysDependency,
+) -> EventBatchResult:
     """Accept a batch of operational events and store them together.
 
     The batch is validated and stored as a whole: if any event fails the
     contract the request is rejected with 422, and if the batch cannot be
-    stored atomically nothing is kept.
+    stored atomically nothing is kept. Sensitive metadata values are masked
+    before storage.
     """
-    return record_events(store, batch)
+    return record_events(store, batch, sensitive_keys=sensitive_keys)
