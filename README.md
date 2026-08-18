@@ -148,6 +148,12 @@ produced it.
   (absent while it is active, cleared if it reopens) and carried into the
   incident summary, so a reader sees how the disruption was resolved. Resolving an
   incident already past resolving is refused rather than silently reapplied.
+- Sensitive-metadata redaction: a metadata value whose key names a sensitive
+  term (a credential, an email, a phone number) is masked with a visible
+  `[redacted]` marker before the event is stored, so it never reaches the
+  database or a later read. The match is deterministic and rule-based, the key
+  is kept so the masking is visible rather than silent, and the built-in term
+  set is widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -738,6 +744,45 @@ with IncidentStore.open("sqlite:///./opsbrief.db") as store:
     store.get(incident.id)  # the stored incident, or None
     store.list_incidents(status=IncidentStatus.OPEN)  # most recently opened first
 ```
+
+## Redaction
+
+Producing systems put free-form detail in an event's `metadata`, and some of it
+may be sensitive: a contact address, a phone number, a credential. This is a
+public project that must never hold private or personal data, so a sensitive
+value is masked before the event is stored rather than kept and hoped to stay
+unseen.
+
+Redaction is deterministic and rule-based, like risk detection: a metadata key
+is sensitive when a configured term appears anywhere in its lowercased name, and
+its value is then replaced by a visible `[redacted]` marker. The key itself is
+kept, so a reader sees the field was present and masked rather than silently
+dropped, and an absent (null) value is left as null since there is nothing to
+hide.
+
+```python
+from opsbrief.redaction import redact_metadata
+
+redact_metadata({"customer_email": "sam@example.com", "required": 4})
+# -> {"customer_email": "[redacted]", "required": 4}
+```
+
+Masking happens at ingestion, so a sensitive value never reaches the database or
+a later read: `POST /events`, `POST /events/batch` and the stores behind them all
+return the redacted form. The built-in term set covers common credentials and
+contact fields (`password`, `secret`, `token`, `api_key`, `email`, `phone`,
+`ssn`, `credit_card` among them). A deployment widens it through
+`OPSBRIEF_REDACT_METADATA_KEYS`, a comma-separated list of extra terms that adds
+to the defaults rather than replacing them:
+
+```bash
+OPSBRIEF_REDACT_METADATA_KEYS="badge_number, seat"
+```
+
+Only `metadata` is redacted. The fields the service reasons over, such as
+`subject` or `entity_id`, are the producer's own operational description and are
+left as submitted, so producers should keep sensitive detail in `metadata` where
+it can be masked.
 
 ## Sample Data
 
@@ -1367,8 +1412,8 @@ started only once the API and core services are stable.
 | AI-045 | Add incident-resolution notes | Incident intelligence | Done |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
-| AI-050 | Add sensitive-field redaction | Safety and explainability | Ready |
-| AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Backlog |
+| AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
+| AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Ready |
 | AI-052 | Add source references to generated output | Safety and explainability | Backlog |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Backlog |
 | AI-054 | Add structured generation audit records | Safety and explainability | Backlog |
@@ -1389,12 +1434,12 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. Phase 4 (Incident intelligence) is complete.
-The next Ready ticket is AI-050 (add sensitive-field redaction), which opens
-Phase 5: with events, briefs and incidents in place, the next concern is keeping
-sensitive fields out of what the service stores and shows. When a ticket's
-dependencies are complete, promote it to Ready so the next change has a clear
-starting point.
+No tickets are currently blocked. Phase 4 (Incident intelligence) is complete,
+and Phase 5 (Safety and explainability) has begun: sensitive metadata values are
+now redacted before storage. The next Ready ticket is AI-051 (configurable fields
+excluded from AI context), which narrows what the model may see on top of what
+the store already masks. When a ticket's dependencies are complete, promote it to
+Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1405,6 +1450,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 - 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
 - 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
 - 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
@@ -1418,7 +1464,6 @@ it is not picked up and left half-finished.
 - 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
 - 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
 - 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
-- 2026-08-09 — Added deterministic daily-brief context assembly: `build_brief_context` gathers the current risks, a bounded recent-events view, incompleteness notes and the source event IDs a brief traces back to, without a model.
 
 ## Future Game Center Integration
 
