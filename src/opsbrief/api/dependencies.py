@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from opsbrief.ai import AIProvider, create_provider
+from opsbrief.config import get_settings
 from opsbrief.storage import EventStore, IncidentStore
 
 
@@ -53,3 +54,16 @@ def get_ai_provider() -> AIProvider:
 
 
 AIProviderDependency = Annotated[AIProvider, Depends(get_ai_provider)]
+
+
+def get_sensitive_metadata_keys() -> frozenset[str]:
+    """Return the metadata key terms redaction masks values for.
+
+    Built per request from the cached settings, so a deployment that widens
+    redaction through ``OPSBRIEF_REDACT_METADATA_KEYS`` takes effect without the
+    router knowing how the set is assembled.
+    """
+    return get_settings().sensitive_metadata_keys()
+
+
+SensitiveMetadataKeysDependency = Annotated[frozenset[str], Depends(get_sensitive_metadata_keys)]

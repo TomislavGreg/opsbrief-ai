@@ -400,3 +400,58 @@ def test_listing_endpoint_is_documented(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
     assert "get" in paths["/events"]
+
+
+def test_sensitive_metadata_is_redacted_before_storage(client: TestClient) -> None:
+    body = client.post(
+        "/events",
+        json=submission(metadata={"email": "sam@example.com", "required": 4}),
+    ).json()
+
+    assert body["metadata"] == {"email": "[redacted]", "required": 4}
+
+
+def test_redacted_metadata_is_what_a_later_read_returns(client: TestClient) -> None:
+    created = client.post(
+        "/events",
+        json=submission(metadata={"api_key": "abc123", "venue": "North Stand"}),
+    ).json()
+
+    fetched = client.get(f"/events/{created['id']}").json()
+
+    assert fetched["metadata"] == {"api_key": "[redacted]", "venue": "North Stand"}
+
+
+def test_batch_redacts_sensitive_metadata(client: TestClient) -> None:
+    body = client.post(
+        "/events/batch",
+        json={
+            "events": [
+                submission(metadata={"phone": "555-0100"}),
+                submission(metadata={"seats": 200}),
+            ]
+        },
+    ).json()
+
+    assert body["events"][0]["metadata"] == {"phone": "[redacted]"}
+    assert body["events"][1]["metadata"] == {"seats": 200}
+
+
+def test_configured_terms_widen_redaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OPSBRIEF_REDACT_METADATA_KEYS adds terms without dropping the defaults."""
+    from opsbrief.config import get_settings
+    from opsbrief.main import create_app
+
+    monkeypatch.setenv("OPSBRIEF_DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("OPSBRIEF_REDACT_METADATA_KEYS", "seat, badge")
+    get_settings.cache_clear()
+    try:
+        with TestClient(create_app()) as client:
+            body = client.post(
+                "/events",
+                json=submission(metadata={"seat": "12A", "email": "sam@example.com", "row": "B"}),
+            ).json()
+    finally:
+        get_settings.cache_clear()
+
+    assert body["metadata"] == {"seat": "[redacted]", "email": "[redacted]", "row": "B"}
