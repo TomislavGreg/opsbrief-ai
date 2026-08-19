@@ -57,6 +57,20 @@ def test_scripted_summary_becomes_the_incident_summary() -> None:
     assert result.incident_id == "inc-1"
 
 
+def test_excluded_fields_are_held_back_from_the_provider() -> None:
+    # An unscripted fake echoes the material it is shown, so the request material
+    # is visible through what it records.
+    provider = FakeAIProvider()
+    incident = make_incident(["e1"])
+    events = [make_event("e1", minutes_ago=20, subject="Steward Jane Doe did not report")]
+
+    generate_incident_summary(incident, events, provider, excluded_fields={"subject"})
+
+    material = provider.requests[0].input
+    assert "Steward Jane Doe did not report" not in material
+    assert "[excluded]" in material
+
+
 def test_structured_facts_are_carried_from_the_incident_not_the_model() -> None:
     provider = FakeAIProvider(responses=["Anything here is only phrasing."])
     incident = make_incident(["e1", "e2"], severity=IncidentSeverity.CRITICAL)
