@@ -16,7 +16,7 @@ as missing here exactly as it is there.
 """
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Container, Iterable, Sequence
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.events import Event
+from opsbrief.exclusion import shown_value
 from opsbrief.incidents.lifecycle import IncidentStatus
 from opsbrief.incidents.schema import Incident, IncidentSeverity
 from opsbrief.incidents.timeline import (
@@ -165,13 +166,21 @@ def _constrain_summary(text: str) -> str:
     return collapsed[:MAX_INCIDENT_SUMMARY_LENGTH].rstrip()
 
 
-def _render_entry(entry: TimelineEntry) -> str:
-    """Render one timeline event as a single deterministic line of material."""
-    status = entry.status.value if entry.status is not None else "unknown"
-    return (
-        f"- {entry.occurred_at.isoformat()} [{entry.severity.value}] {entry.source} "
-        f"{entry.event_type}: {entry.subject} (status: {status})"
-    )
+def _render_entry(entry: TimelineEntry, excluded_fields: Container[str]) -> str:
+    """Render one timeline event as a single deterministic line of material.
+
+    Fields named in ``excluded_fields`` are shown as a visible placeholder rather
+    than their value, so a deployment can hold a field back from the model without
+    changing the layout of the line.
+    """
+    occurred = shown_value("occurred_at", entry.occurred_at.isoformat(), excluded_fields)
+    severity = shown_value("severity", entry.severity.value, excluded_fields)
+    source = shown_value("source", entry.source, excluded_fields)
+    event_type = shown_value("event_type", entry.event_type, excluded_fields)
+    subject = shown_value("subject", entry.subject, excluded_fields)
+    status_value = entry.status.value if entry.status is not None else "unknown"
+    status = shown_value("status", status_value, excluded_fields)
+    return f"- {occurred} [{severity}] {source} {event_type}: {subject} (status: {status})"
 
 
 def _render_section(title: str, lines: Sequence[str]) -> list[str]:
@@ -181,7 +190,12 @@ def _render_section(title: str, lines: Sequence[str]) -> list[str]:
     return [f"{title}:", *lines]
 
 
-def render_incident_material(incident: Incident, timeline: IncidentTimeline) -> str:
+def render_incident_material(
+    incident: Incident,
+    timeline: IncidentTimeline,
+    *,
+    excluded_fields: Container[str] = frozenset(),
+) -> str:
     """Render an incident and its timeline as the material shown to the model.
 
     The rendering is deterministic and bounded: the timeline is already bounded to
@@ -191,7 +205,10 @@ def render_incident_material(incident: Incident, timeline: IncidentTimeline) -> 
     model is shown the same start and end a reader would see, and missing cited
     events are noted so the model is not misled into implying a complete picture.
     A resolution note, when the incident carries one, is shown too, so the model
-    can phrase how the incident was put right.
+    can phrase how the incident was put right. Event fields named in
+    ``excluded_fields`` are held back from the timeline lines with a visible
+    placeholder, narrowing what the model sees without changing the incident's
+    cited evidence or its span.
     """
     span = "no cited events resolved to a stored record"
     if timeline.started_at is not None and timeline.ended_at is not None:
@@ -203,7 +220,8 @@ def render_incident_material(incident: Incident, timeline: IncidentTimeline) -> 
         f"Span: {span}",
         "",
         *_render_section(
-            "Timeline (oldest first)", [_render_entry(entry) for entry in timeline.entries]
+            "Timeline (oldest first)",
+            [_render_entry(entry, excluded_fields) for entry in timeline.entries],
         ),
     ]
     if incident.resolution_note is not None:
@@ -227,6 +245,7 @@ def generate_incident_summary(
     *,
     instructions: str = DEFAULT_INCIDENT_INSTRUCTIONS,
     max_output_tokens: int = 512,
+    excluded_fields: Container[str] = frozenset(),
 ) -> IncidentSummary:
     """Summarise ``incident`` against ``events``, phrased by ``provider``.
 
@@ -235,6 +254,9 @@ def generate_incident_summary(
     the model returns is constrained to a bounded, single-line summary; the
     structured facts a reader acts on are taken from the incident and its timeline
     unchanged, so the model rephrases the picture but never changes what it says.
+    Event fields named in ``excluded_fields`` are held back from the timeline the
+    model is shown, so a deployment can narrow the model's view without changing
+    the incident's cited evidence or its span.
 
     The summary's ``source_event_ids`` are the incident's cited events in cited
     order, so it traces back to the same evidence the incident does, and any cited
@@ -251,7 +273,7 @@ def generate_incident_summary(
     timeline = build_incident_timeline(incident, events)
     request = CompletionRequest(
         instructions=instructions,
-        input=render_incident_material(incident, timeline),
+        input=render_incident_material(incident, timeline, excluded_fields=excluded_fields),
         max_output_tokens=max_output_tokens,
     )
     notes: list[str] = []

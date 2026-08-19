@@ -103,3 +103,26 @@ def test_render_says_none_when_no_events_resolve() -> None:
 
     assert "Timeline (oldest first): none." in rendered
     assert "no cited events resolved" in rendered
+
+
+def test_render_holds_back_excluded_event_fields() -> None:
+    events = [make_event("e1", minutes_ago=20, subject="Steward Jane Doe did not report")]
+    incident = make_incident(["e1"])
+
+    rendered = render_incident_material(
+        incident, build_incident_timeline(incident, events), excluded_fields={"subject"}
+    )
+
+    assert "Steward Jane Doe did not report" not in rendered
+    assert "[excluded]" in rendered
+    # A field that was not excluded is still shown.
+    assert "integrations integration.failed" in rendered
+
+
+def test_render_shows_every_field_when_nothing_is_excluded() -> None:
+    events = [make_event("e1", minutes_ago=20)]
+    incident = make_incident(["e1"])
+
+    rendered = render_incident_material(incident, build_incident_timeline(incident, events))
+
+    assert "[excluded]" not in rendered
