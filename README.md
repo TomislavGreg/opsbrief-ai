@@ -154,6 +154,14 @@ produced it.
   database or a later read. The match is deterministic and rule-based, the key
   is kept so the masking is visible rather than silent, and the built-in term
   set is widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
+- Configurable AI context exclusion: a deployment can name event fields that are
+  held back from the plain-text material a model is shown, on top of what
+  redaction masks at storage. An excluded field is replaced by a visible
+  `[excluded]` marker in the daily-brief and incident-summary material, so the
+  model never sees it, while the deterministic picture a reader acts on (the
+  risks, the source event IDs, the span) is unchanged. The fields are chosen
+  through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS` and validated against the
+  renderable set, so an unknown field fails loudly rather than leaking silently.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -784,6 +792,42 @@ Only `metadata` is redacted. The fields the service reasons over, such as
 left as submitted, so producers should keep sensitive detail in `metadata` where
 it can be masked.
 
+## AI Context Exclusion
+
+Redaction masks sensitive metadata values before an event is stored. Field
+exclusion is a second, complementary control that narrows what a model may see
+once an event is already stored: a deployment can name event fields that are held
+back from the plain-text material a provider is shown, without touching the
+stored event or the deterministic structured output a reader acts on.
+
+The two controls are deliberately different. Redaction happens once, at
+ingestion, and changes what is kept. Exclusion happens every time material is
+rendered for a model, and changes only what the model is shown. The risks, the
+source event IDs and the recent-events digest the service reasons over are
+unchanged, so a brief or an incident summary still traces back to the same
+evidence. Like redaction, exclusion keeps the field's label with a visible
+`[excluded]` marker in the rendered material, so a reader of the prompt sees the
+field was present and withheld rather than silently dropped.
+
+```bash
+OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS="subject, source"
+```
+
+The excludable fields are exactly those the brief and incident renderers describe
+an event with: `source`, `event_type`, `subject`, `severity`, `status` and
+`occurred_at`. An event's `id` and `metadata` are never rendered into that
+material, so they are not excludable. A configured name that is not one of these
+is refused when the settings are read, so a misconfiguration fails loudly at
+wiring time rather than leaving a field the operator meant to hold back in the
+model's view. The setting applies to both the daily brief (through `GET /brief`
+and the `opsbrief` command) and incident summaries.
+
+Exclusion narrows the recent-events view a model is shown, not the risks. A risk
+title is a deterministic, rule-produced statement, not a raw event field, so it
+is carried through unchanged: a reader acts on risks, and they are the point of
+the brief. To keep a detail out of both, keep it in `metadata` where redaction
+masks it, rather than in a field a rule reads.
+
 ## Sample Data
 
 The package ships a small set of synthetic operational events describing one
@@ -1413,8 +1457,8 @@ started only once the API and core services are stable.
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
-| AI-051 | Add configurable fields excluded from AI context | Safety and explainability | In Progress |
-| AI-052 | Add source references to generated output | Safety and explainability | Backlog |
+| AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
+| AI-052 | Add source references to generated output | Safety and explainability | Ready |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Backlog |
 | AI-054 | Add structured generation audit records | Safety and explainability | Backlog |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Backlog |
@@ -1435,11 +1479,12 @@ started only once the API and core services are stable.
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
 No tickets are currently blocked. Phase 4 (Incident intelligence) is complete,
-and Phase 5 (Safety and explainability) has begun: sensitive metadata values are
-now redacted before storage. The next Ready ticket is AI-051 (configurable fields
-excluded from AI context), which narrows what the model may see on top of what
-the store already masks. When a ticket's dependencies are complete, promote it to
-Ready so the next change has a clear starting point.
+and Phase 5 (Safety and explainability) is under way: sensitive metadata values
+are redacted before storage, and a deployment can now hold configured event
+fields back from the material a model is shown. The next Ready ticket is AI-052
+(source references on generated output), which makes each generated statement
+name the source events behind it. When a ticket's dependencies are complete,
+promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1450,6 +1495,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
 - 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 - 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
 - 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
@@ -1463,7 +1509,6 @@ it is not picked up and left half-finished.
 - 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
 - 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
 - 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
-- 2026-08-09 — Added structured daily-brief generation: `generate_brief` turns a context into a `DailyBrief` whose summary is phrased by the provider and constrained as untrusted output, with risks, notes and source event IDs carried over deterministically.
 
 ## Future Game Center Integration
 
