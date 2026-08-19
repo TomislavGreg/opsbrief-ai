@@ -14,7 +14,7 @@ part of a brief, exactly as any other external data would be.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Container, Sequence
 
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
@@ -26,6 +26,7 @@ from opsbrief.brief.schema import (
     DailyBrief,
     EventDigest,
 )
+from opsbrief.exclusion import shown_value
 from opsbrief.risks import Risk
 
 #: The task the model performs, phrased by the service. It asks only for prose:
@@ -61,14 +62,21 @@ def _render_risk(risk: Risk) -> str:
     return f"- [{risk.severity.value}] {risk.title} ({risk.rule}; events: {events})"
 
 
-def _render_event(digest: EventDigest) -> str:
-    """Render one recent event as a single deterministic line of material."""
-    occurred = digest.occurred_at.isoformat()
-    status = digest.status.value if digest.status is not None else "unknown"
-    return (
-        f"- {occurred} [{digest.severity.value}] {digest.source} "
-        f"{digest.event_type}: {digest.subject} (status: {status})"
-    )
+def _render_event(digest: EventDigest, excluded_fields: Container[str]) -> str:
+    """Render one recent event as a single deterministic line of material.
+
+    Fields named in ``excluded_fields`` are shown as a visible placeholder rather
+    than their value, so a deployment can hold a field back from the model without
+    changing the layout of the line.
+    """
+    occurred = shown_value("occurred_at", digest.occurred_at.isoformat(), excluded_fields)
+    severity = shown_value("severity", digest.severity.value, excluded_fields)
+    source = shown_value("source", digest.source, excluded_fields)
+    event_type = shown_value("event_type", digest.event_type, excluded_fields)
+    subject = shown_value("subject", digest.subject, excluded_fields)
+    status_value = digest.status.value if digest.status is not None else "unknown"
+    status = shown_value("status", status_value, excluded_fields)
+    return f"- {occurred} [{severity}] {source} {event_type}: {subject} (status: {status})"
 
 
 def _render_section(title: str, lines: Sequence[str]) -> list[str]:
@@ -78,12 +86,15 @@ def _render_section(title: str, lines: Sequence[str]) -> list[str]:
     return [f"{title}:", *lines]
 
 
-def render_context(context: BriefContext) -> str:
+def render_context(context: BriefContext, *, excluded_fields: Container[str] = frozenset()) -> str:
     """Render a brief context as the plain-text material shown to the model.
 
     The rendering is deterministic and bounded: the context is already bounded,
     and the result is capped at :data:`MAX_PROMPT_LENGTH` so the request the
-    provider receives is always well-formed, whatever the context holds.
+    provider receives is always well-formed, whatever the context holds. Event
+    fields named in ``excluded_fields`` are held back from the recent-events view
+    with a visible placeholder, narrowing what the model sees without touching the
+    risks or the source event IDs a reader acts on.
     """
     lines: list[str] = [
         f"Operational picture as of {context.generated_at.isoformat()}.",
@@ -92,7 +103,8 @@ def render_context(context: BriefContext) -> str:
         *_render_section("Risks (most urgent first)", [_render_risk(r) for r in context.risks]),
         "",
         *_render_section(
-            "Recent events (newest first)", [_render_event(e) for e in context.recent_events]
+            "Recent events (newest first)",
+            [_render_event(e, excluded_fields) for e in context.recent_events],
         ),
     ]
     if context.notes:
@@ -109,6 +121,7 @@ def generate_brief(
     *,
     instructions: str = DEFAULT_INSTRUCTIONS,
     max_output_tokens: int = 512,
+    excluded_fields: Container[str] = frozenset(),
 ) -> DailyBrief:
     """Turn an assembled context into a daily brief, phrased by ``provider``.
 
@@ -116,7 +129,9 @@ def generate_brief(
     returns is constrained to a bounded, single-line summary. The brief's
     structured facts — the risks, the notes and the source event IDs — are taken
     from ``context`` unchanged, so the model rephrases the picture but never
-    changes what it says.
+    changes what it says. Event fields named in ``excluded_fields`` are held back
+    from the material the model is shown, so a deployment can narrow the model's
+    view without changing the deterministic picture behind the brief.
 
     The model is a phrasing layer, not the product, so it is never allowed to
     fail the brief. When it returns no usable summary, or when the provider
@@ -128,7 +143,7 @@ def generate_brief(
     """
     request = CompletionRequest(
         instructions=instructions,
-        input=render_context(context),
+        input=render_context(context, excluded_fields=excluded_fields),
         max_output_tokens=max_output_tokens,
     )
     notes = list(context.notes)

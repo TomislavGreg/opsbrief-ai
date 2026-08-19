@@ -64,6 +64,21 @@ def test_summary_is_phrased_by_the_provider_and_constrained() -> None:
     assert len(provider.requests) == 1
 
 
+def test_excluded_fields_are_held_back_from_the_provider() -> None:
+    # An unscripted fake echoes the material it is shown, so the request material
+    # is visible through what it returns and records.
+    now = datetime.now(UTC).replace(microsecond=0)
+    provider = FakeAIProvider()
+    with EventStore.open("sqlite:///:memory:") as store:
+        store_event(store, subject="Steward Jane Doe did not report")
+
+        report_daily_brief(store, now, provider, excluded_fields={"subject"})
+
+    material = provider.requests[0].input
+    assert "Steward Jane Doe did not report" not in material
+    assert "[excluded]" in material
+
+
 def test_missing_summary_is_noted_rather_than_invented() -> None:
     now = datetime.now(UTC).replace(microsecond=0)
     provider = FakeAIProvider(responses=["   "])
