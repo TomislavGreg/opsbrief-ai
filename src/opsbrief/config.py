@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from opsbrief.exclusion import normalise_excluded_fields
 from opsbrief.redaction import DEFAULT_SENSITIVE_KEYS
 
 
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./opsbrief.db"
     ai_provider: str = "fake"
     redact_metadata_keys: str = ""
+    ai_context_excluded_fields: str = ""
 
     def sensitive_metadata_keys(self) -> frozenset[str]:
         """Return the metadata key terms redaction masks values for.
@@ -38,6 +40,16 @@ class Settings(BaseSettings):
         """
         extra = (term.strip() for term in self.redact_metadata_keys.split(","))
         return DEFAULT_SENSITIVE_KEYS | frozenset(term for term in extra if term)
+
+    def excluded_ai_context_fields(self) -> frozenset[str]:
+        """Return the event fields held back from the material a model is shown.
+
+        ``OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`` names them as a comma-separated
+        list; an empty setting excludes nothing. Each name must be one of
+        :data:`~opsbrief.exclusion.EXCLUDABLE_CONTEXT_FIELDS`, so an unknown field
+        is refused here rather than silently ignored.
+        """
+        return normalise_excluded_fields(self.ai_context_excluded_fields.split(","))
 
 
 @lru_cache
