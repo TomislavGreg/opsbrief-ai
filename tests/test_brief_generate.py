@@ -179,3 +179,28 @@ def test_render_context_says_none_when_there_are_no_risks() -> None:
     rendered = render_context(make_context(risks=[]))
 
     assert "Risks (most urgent first): none." in rendered
+
+
+def test_render_context_holds_back_excluded_event_fields() -> None:
+    rendered = render_context(make_context(), excluded_fields={"subject"})
+
+    assert "Safety inspection for North Stand is overdue" not in rendered.split("Recent events")[1]
+    assert "[excluded]" in rendered
+    # A field that was not excluded is still shown.
+    assert "safety inspection.overdue" in rendered
+
+
+def test_render_context_shows_every_field_when_nothing_is_excluded() -> None:
+    rendered = render_context(make_context())
+
+    assert "[excluded]" not in rendered
+
+
+def test_excluded_field_is_kept_out_of_the_provider_request() -> None:
+    provider = FakeAIProvider()
+
+    generate_brief(make_context(), provider, excluded_fields={"subject"})
+
+    material = provider.requests[0].input
+    assert "Safety inspection for North Stand is overdue" not in material.split("Recent events")[1]
+    assert "[excluded]" in material
