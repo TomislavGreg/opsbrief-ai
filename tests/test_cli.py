@@ -149,6 +149,38 @@ def test_empty_store_still_produces_a_brief_that_says_so(
     assert "Source events: none." in out
 
 
+def store_plain_event(url: str, subject: str) -> str:
+    """Store one event that raises no risk and return its identifier."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    payload = {
+        "source": "tasks",
+        "event_type": "task.update",
+        "subject": subject,
+        "occurred_at": (now - timedelta(hours=6)).isoformat(),
+    }
+    event = Event.from_input(EventInput(**payload))
+    with EventStore.open(url) as store:
+        store.add(event)
+    return event.id
+
+
+def test_configured_excluded_fields_are_held_back_from_the_model(
+    database_url: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The unscripted fake provider echoes the material it is shown, so the summary
+    # reveals what the model saw. An excluded field is held back from it.
+    store_plain_event(database_url, subject="Steward Jane Doe did not report")
+    monkeypatch.setenv("OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS", "subject")
+    get_settings.cache_clear()
+
+    exit_code = run([])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Steward Jane Doe did not report" not in out
+    assert "[excluded]" in out
+
+
 def test_an_unknown_format_is_rejected() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--format", "yaml"])

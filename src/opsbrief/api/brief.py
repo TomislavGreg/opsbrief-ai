@@ -12,7 +12,11 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
-from opsbrief.api.dependencies import AIProviderDependency, EventStoreDependency
+from opsbrief.api.dependencies import (
+    AIProviderDependency,
+    EventStoreDependency,
+    ExcludedAIContextFieldsDependency,
+)
 from opsbrief.brief import DailyBrief
 from opsbrief.services import report_daily_brief
 
@@ -25,7 +29,11 @@ router = APIRouter(prefix="/brief", tags=["brief"])
     summary="Generate the current daily operations brief",
     response_description="The current brief: a model summary over the deterministic picture.",
 )
-def read_brief(store: EventStoreDependency, provider: AIProviderDependency) -> DailyBrief:
+def read_brief(
+    store: EventStoreDependency,
+    provider: AIProviderDependency,
+    excluded_fields: ExcludedAIContextFieldsDependency,
+) -> DailyBrief:
     """Return the daily brief across the stored events, most urgent risks first.
 
     The canonical risk rules and a bounded recent-events view are assembled over
@@ -35,6 +43,8 @@ def read_brief(store: EventStoreDependency, provider: AIProviderDependency) -> D
     Everything a reader acts on — the prioritized risks, the notes on where the
     picture is incomplete, and the source event IDs every claim traces back to —
     comes from the deterministic context; only the summary comes from the model,
-    and it is constrained as untrusted output.
+    and it is constrained as untrusted output. Any event fields a deployment holds
+    back through ``OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`` are kept out of the
+    material the model is shown, without changing that deterministic picture.
     """
-    return report_daily_brief(store, datetime.now(UTC), provider)
+    return report_daily_brief(store, datetime.now(UTC), provider, excluded_fields=excluded_fields)

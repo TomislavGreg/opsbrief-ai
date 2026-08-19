@@ -67,3 +67,18 @@ def get_sensitive_metadata_keys() -> frozenset[str]:
 
 
 SensitiveMetadataKeysDependency = Annotated[frozenset[str], Depends(get_sensitive_metadata_keys)]
+
+
+def get_excluded_ai_context_fields() -> frozenset[str]:
+    """Return the event fields held back from the material a model is shown.
+
+    Built per request from the cached settings, so a deployment that narrows the
+    model's view through ``OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`` takes effect
+    without the router knowing how the set is assembled.
+    """
+    return get_settings().excluded_ai_context_fields()
+
+
+ExcludedAIContextFieldsDependency = Annotated[
+    frozenset[str], Depends(get_excluded_ai_context_fields)
+]

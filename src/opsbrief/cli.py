@@ -105,16 +105,23 @@ def build_parser() -> argparse.ArgumentParser:
 def generate() -> DailyBrief:
     """Assemble and phrase the current brief over the configured event store.
 
-    The store and the provider are both taken from the application settings, so
-    the CLI reports on the same database the API serves and phrases with the same
-    provider. The store is opened for the read and closed again, because a
-    command-line run owns no long-lived application to hold it. The reference
-    instant is the moment of the run, as it is the moment of the request for the
-    API.
+    The store, the provider and any fields held back from the model's view are
+    all taken from the application settings, so the CLI reports on the same
+    database the API serves, phrases with the same provider and narrows the
+    model's view exactly as the API does. The store is opened for the read and
+    closed again, because a command-line run owns no long-lived application to
+    hold it. The reference instant is the moment of the run, as it is the moment
+    of the request for the API.
     """
     settings = get_settings()
+    excluded_fields = settings.excluded_ai_context_fields()
     with EventStore.open(settings.database_url) as store:
-        return report_daily_brief(store, datetime.now(UTC), create_provider())
+        return report_daily_brief(
+            store,
+            datetime.now(UTC),
+            create_provider(),
+            excluded_fields=excluded_fields,
+        )
 
 
 def run(argv: Sequence[str] | None = None) -> int:

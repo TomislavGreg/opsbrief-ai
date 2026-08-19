@@ -6,7 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse
-from opsbrief.api.dependencies import get_ai_provider
+from opsbrief.api.dependencies import get_ai_provider, get_excluded_ai_context_fields
 
 
 def submission(**overrides: Any) -> dict[str, Any]:
@@ -68,6 +68,35 @@ def test_endpoint_takes_no_parameters(client: TestClient) -> None:
     # A stray query parameter does not break the endpoint; it reports the whole
     # current picture regardless.
     assert client.get("/brief", params={"source": "tasks"}).status_code == 200
+
+
+def test_configured_excluded_fields_are_held_back_from_the_model(client: TestClient) -> None:
+    # A deployment that excludes a field keeps it out of the material the model is
+    # shown, while the deterministic picture a reader acts on is unchanged.
+    class RecordingProvider:
+        name = "recording"
+
+        def __init__(self) -> None:
+            self.requests: list[CompletionRequest] = []
+
+        def complete(self, request: CompletionRequest) -> CompletionResponse:
+            self.requests.append(request)
+            return CompletionResponse(text="A summary.", model=self.name)
+
+    post_event(client, subject="Steward Jane Doe did not report")
+    provider = RecordingProvider()
+    client.app.dependency_overrides[get_ai_provider] = lambda: provider
+    client.app.dependency_overrides[get_excluded_ai_context_fields] = lambda: frozenset({"subject"})
+    try:
+        response = client.get("/brief")
+    finally:
+        client.app.dependency_overrides.pop(get_ai_provider, None)
+        client.app.dependency_overrides.pop(get_excluded_ai_context_fields, None)
+
+    assert response.status_code == 200
+    material = provider.requests[0].input
+    assert "Steward Jane Doe did not report" not in material
+    assert "[excluded]" in material
 
 
 def test_a_provider_outage_still_returns_the_deterministic_brief(client: TestClient) -> None:
