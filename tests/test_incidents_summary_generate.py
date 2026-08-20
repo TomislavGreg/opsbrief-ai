@@ -152,6 +152,36 @@ def test_a_cited_event_that_no_longer_resolves_is_reported_and_noted() -> None:
     assert any("no longer resolve" in note for note in result.notes)
 
 
+def test_references_resolve_the_cited_events_in_cited_order() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+    incident = make_incident(["e1", "e2"])
+    events = [
+        make_event("e2", minutes_ago=10, subject="Second failure"),
+        make_event("e1", minutes_ago=90, subject="First failure"),
+    ]
+
+    result = generate_incident_summary(incident, events, provider)
+
+    # One reference per cited id, in cited order, matching source_event_ids.
+    assert [reference.event_id for reference in result.references] == result.source_event_ids
+    assert [reference.event_id for reference in result.references] == ["e1", "e2"]
+    assert all(reference.resolved for reference in result.references)
+    assert result.references[0].subject == "First failure"
+
+
+def test_a_missing_cited_id_becomes_an_unresolved_reference() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+    incident = make_incident(["e1", "e2"])
+
+    result = generate_incident_summary(incident, [make_event("e1", minutes_ago=20)], provider)
+
+    by_id = {reference.event_id: reference for reference in result.references}
+    assert [reference.event_id for reference in result.references] == ["e1", "e2"]
+    assert by_id["e1"].resolved is True
+    assert by_id["e2"].resolved is False
+    assert by_id["e2"].subject is None
+
+
 def test_the_request_is_bounded_and_records_the_rendered_material() -> None:
     provider = FakeAIProvider(responses=["ok"])
     incident = make_incident(["e1"])

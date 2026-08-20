@@ -19,6 +19,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from opsbrief.events import EventSeverity, EventStatus
+from opsbrief.references import SourceReference
 from opsbrief.risks import Risk
 
 #: Upper bound, in characters, on a brief's model-phrased summary. The summary is
@@ -31,7 +32,7 @@ MAX_SUMMARY_LENGTH = 1_000
 #: one and a stored brief stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`DailyBrief` change in a way a consumer would
 #: need to notice.
-BRIEF_OUTPUT_VERSION = "daily-brief/1"
+BRIEF_OUTPUT_VERSION = "daily-brief/2"
 
 #: Version of the prompt a brief's summary was produced with — the instructions
 #: and the context rendering in :mod:`opsbrief.brief.generate`. Every generated
@@ -86,6 +87,31 @@ class EventDigest(BaseModel):
     )
 
 
+def collect_source_event_ids(
+    risks: "list[Risk]",
+    recent_events: "list[EventDigest]",
+) -> list[str]:
+    """Return every distinct event id a brief draws on, in citation order.
+
+    The risks' cited events come first, in priority order, then any recent event
+    not already cited by a risk. The order is what the eventual brief traces back
+    to and the order its source references follow, so both stay in step with each
+    other and with the material they summarise.
+    """
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for risk in risks:
+        for event_id in risk.event_ids:
+            if event_id not in seen:
+                seen.add(event_id)
+                ordered.append(event_id)
+    for digest in recent_events:
+        if digest.id not in seen:
+            seen.add(digest.id)
+            ordered.append(digest.id)
+    return ordered
+
+
 class BriefContext(BaseModel):
     """The deterministic material a daily brief is built from.
 
@@ -116,32 +142,23 @@ class BriefContext(BaseModel):
         default_factory=list,
         description="Where the picture is incomplete, for example no events or no risks.",
     )
+    references: list[SourceReference] = Field(
+        default_factory=list,
+        description="Each source event id resolved to what the event was, in citation order.",
+    )
 
     @computed_field(  # type: ignore[prop-decorator]
         description="Every distinct source event id the context draws on.",
     )
     @property
     def source_event_ids(self) -> list[str]:
-        """Return every distinct event id the context draws on.
+        """Return every distinct event id the context draws on, in citation order.
 
-        The risks' cited events come first, in priority order, then any recent
-        event not already cited by a risk. The result is what the eventual brief
-        traces back to, so a reader can check every claim against a real event.
         It is derived from ``risks`` and ``recent_events`` rather than stored, so
-        it can never disagree with the material it summarises.
+        it can never disagree with the material it summarises, and it follows the
+        same order as ``references`` so the two stay in step.
         """
-        ordered: list[str] = []
-        seen: set[str] = set()
-        for risk in self.risks:
-            for event_id in risk.event_ids:
-                if event_id not in seen:
-                    seen.add(event_id)
-                    ordered.append(event_id)
-        for digest in self.recent_events:
-            if digest.id not in seen:
-                seen.add(digest.id)
-                ordered.append(digest.id)
-        return ordered
+        return collect_source_event_ids(self.risks, self.recent_events)
 
 
 class DailyBrief(BaseModel):
@@ -154,9 +171,12 @@ class DailyBrief(BaseModel):
     ``risks``, the ``notes`` on where the picture is incomplete, and the
     ``source_event_ids`` every claim traces back to — is carried over unchanged
     from the deterministic :class:`BriefContext`, so a model can rephrase the
-    picture but never change what it says. ``model`` names the model that
-    produced the summary, so a generated statement traces to its model just as a
-    risk traces to its rule. ``output_version`` names the shape the brief was
+    picture but never change what it says. Alongside the flat ``source_event_ids``,
+    ``references`` resolves each of those ids to what the event was, in the same
+    order, so the brief is self-describing and a reader need not look every cited
+    event up separately. ``model`` names the model that produced the summary, so a
+    generated statement traces to its model just as a risk traces to its rule.
+    ``output_version`` names the shape the brief was
     produced in, and ``prompt_version`` names the prompt that phrased its summary,
     so a stored or piped brief stays interpretable — and a change in structure or
     phrasing stays visible — after either changes.
@@ -198,4 +218,8 @@ class DailyBrief(BaseModel):
     source_event_ids: list[str] = Field(
         default_factory=list,
         description="Every source event id the brief traces back to.",
+    )
+    references: list[SourceReference] = Field(
+        default_factory=list,
+        description="Each source event id resolved to what the event was, in the same order.",
     )

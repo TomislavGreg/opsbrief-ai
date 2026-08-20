@@ -162,6 +162,14 @@ produced it.
   risks, the source event IDs, the span) is unchanged. The fields are chosen
   through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS` and validated against the
   renderable set, so an unknown field fails loudly rather than leaking silently.
+- Source references on generated output: alongside the flat `source_event_ids` a
+  daily brief and an incident summary already carry, each generated output now
+  resolves every cited id to a compact `SourceReference` describing what the event
+  was (its source, type, subject, occurrence, severity and status), in the same
+  order. The generated output is self-describing, so a reader does not look every
+  cited event up separately, and a cited id no stored event answers to is carried
+  as a visible unresolved reference rather than dropped. Resolution is
+  deterministic and holds no model involvement.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -484,7 +492,7 @@ prioritized `risks`, the `notes` on where the picture is incomplete, and the
   "generated_at": "2026-07-29T18:00:00Z",
   "summary": "One integration keeps failing and a safety inspection is overdue; deal with the ticketing failures first.",
   "model": "fake-1",
-  "output_version": "daily-brief/1",
+  "output_version": "daily-brief/2",
   "prompt_version": "brief-prompt/1",
   "risks": [
     {
@@ -503,7 +511,19 @@ prioritized `risks`, the `notes` on where the picture is incomplete, and the
     }
   ],
   "notes": [],
-  "source_event_ids": ["e17", "e18", "e19", "e20", "e21", "e04"]
+  "source_event_ids": ["e17", "e18", "e19", "e20", "e21", "e04"],
+  "references": [
+    {
+      "event_id": "e17",
+      "resolved": true,
+      "source": "integrations",
+      "event_type": "integration.failed",
+      "subject": "Ticketing webhook failed",
+      "occurred_at": "2026-07-29T14:05:00Z",
+      "severity": "high",
+      "status": "failed"
+    }
+  ]
 }
 ```
 
@@ -828,6 +848,38 @@ is carried through unchanged: a reader acts on risks, and they are the point of
 the brief. To keep a detail out of both, keep it in `metadata` where redaction
 masks it, rather than in a field a rule reads.
 
+## Source References
+
+Every generated output traces back to the events behind it through a list of
+source event ids. An id tells a reader which event to look up, not what it was. A
+source reference closes that gap: it resolves an id against the stored events into
+a compact descriptor, so the generated output is self-describing.
+
+```python
+from opsbrief.references import build_source_references
+
+references = build_source_references(["e17", "gone"], events)  # events: stored Events
+references[0].resolved  # True
+references[0].subject  # "Ticketing webhook failed"
+references[1].resolved  # False, no stored event answered to "gone"
+```
+
+A `SourceReference` always names the `event_id` it was built for and whether a
+stored event `resolved` it. A resolved reference carries the fields a brief digest
+or a timeline entry describes an event with (`source`, `event_type`, `subject`,
+`occurred_at`, `severity` and `status`), not the free-form `metadata`, so it stays
+as bounded as the digests it sits alongside. A cited id that no stored event
+answers to becomes an unresolved reference with those fields left null, so a gap
+in the evidence is stated plainly rather than passed over.
+
+A daily brief and an incident summary both carry a `references` list next to their
+flat `source_event_ids`: one reference per cited id, in the same order, so the two
+stay in step. Resolution is deterministic and holds no model involvement, exactly
+like the evidence it describes, so a reference never invents or reshapes what an
+event was. Because the structure of the generated output changed, `GET /brief`
+now reports `output_version` `daily-brief/2` and an incident summary reports
+`incident-summary/2`.
+
 ## Sample Data
 
 The package ships a small set of synthetic operational events describing one
@@ -1110,6 +1162,7 @@ brief.prompt_version  # the prompt that phrased the summary
 brief.risks  # the current risks, carried over from the context
 brief.notes  # where the picture is incomplete
 brief.source_event_ids  # every event id the brief traces back to
+brief.references  # each of those ids resolved to what the event was
 ```
 
 The division of labour is the whole point. The model contributes only the
@@ -1325,6 +1378,7 @@ summary.severity  # how serious it is
 summary.resolution_note  # how it was resolved, when it carries a note
 summary.started_at, summary.ended_at  # the span its cited events ran over
 summary.source_event_ids  # the incident's cited events, in cited order
+summary.references  # each cited id resolved to what the event was
 summary.missing_event_ids  # cited IDs no stored event answered to
 summary.notes  # where the picture is incomplete
 ```
@@ -1458,8 +1512,8 @@ started only once the API and core services are stable.
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
-| AI-052 | Add source references to generated output | Safety and explainability | In Progress |
-| AI-053 | Add confidence and missing-data warnings | Safety and explainability | Backlog |
+| AI-052 | Add source references to generated output | Safety and explainability | Done |
+| AI-053 | Add confidence and missing-data warnings | Safety and explainability | Ready |
 | AI-054 | Add structured generation audit records | Safety and explainability | Backlog |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Backlog |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
@@ -1480,11 +1534,12 @@ Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
 No tickets are currently blocked. Phase 4 (Incident intelligence) is complete,
 and Phase 5 (Safety and explainability) is under way: sensitive metadata values
-are redacted before storage, and a deployment can now hold configured event
-fields back from the material a model is shown. The next Ready ticket is AI-052
-(source references on generated output), which makes each generated statement
-name the source events behind it. When a ticket's dependencies are complete,
-promote it to Ready so the next change has a clear starting point.
+are redacted before storage, a deployment can hold configured event fields back
+from the material a model is shown, and every generated output now resolves each
+cited event id to a descriptive source reference. The next Ready ticket is AI-053
+(confidence and missing-data warnings), which makes a generated output state how
+much of the picture is uncertain or missing. When a ticket's dependencies are
+complete, promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1495,6 +1550,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
 - 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
 - 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 - 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
@@ -1508,7 +1564,6 @@ it is not picked up and left half-finished.
 - 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
 - 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
 - 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
-- 2026-08-10 — Added the `GET /brief` endpoint: it assembles the deterministic brief context over the whole stored event history and returns the current daily brief, a model-phrased summary alongside the prioritized risks, notes and source event IDs behind it.
 
 ## Future Game Center Integration
 

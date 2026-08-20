@@ -32,6 +32,7 @@ from opsbrief.incidents.timeline import (
     TimelineEntry,
     build_incident_timeline,
 )
+from opsbrief.references import SourceReference, build_source_references
 
 #: Upper bound, in characters, on an incident summary's model-phrased text. The
 #: summary is untrusted model output, so it is constrained to a bounded length
@@ -43,7 +44,7 @@ MAX_INCIDENT_SUMMARY_LENGTH = 1_000
 #: and a stored summary stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`IncidentSummary` change in a way a consumer would
 #: need to notice.
-INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/1"
+INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/2"
 
 #: Version of the prompt an incident summary was produced with: the instructions
 #: and the material rendering in this module. Every summary records it, so its
@@ -65,7 +66,12 @@ class IncidentSummary(BaseModel):
     timeline span, ``source_event_ids`` from the incident's cited evidence in cited
     order, and
     ``missing_event_ids`` from any cited identifier no stored event answered to. So
-    a model can rephrase the picture but never change what it says. ``model`` names
+    a model can rephrase the picture but never change what it says. Alongside the
+    flat ``source_event_ids``, ``references`` resolves each cited id to what the
+    event was, in the same cited order, so the summary is self-describing and a
+    reader need not look every cited event up separately; a cited id no stored event
+    answered to is carried as an unresolved reference, matching
+    ``missing_event_ids``. ``model`` names
     the model that produced the summary, so a generated statement traces to its
     model just as an incident traces to its events. ``output_version`` names the
     shape it was produced in and ``prompt_version`` the prompt that phrased it, so a
@@ -126,6 +132,10 @@ class IncidentSummary(BaseModel):
     )
     source_event_ids: list[str] = Field(
         description="The incident's cited events, in cited order, so the summary traces back.",
+    )
+    references: list[SourceReference] = Field(
+        default_factory=list,
+        description="Each cited event id resolved to what the event was, in cited order.",
     )
     missing_event_ids: list[str] = Field(
         default_factory=list,
@@ -262,6 +272,8 @@ def generate_incident_summary(
     order, so it traces back to the same evidence the incident does, and any cited
     identifier no stored event answered to is carried in ``missing_event_ids`` and
     noted, so a gap in the evidence is stated plainly rather than implied away.
+    Alongside those ids, ``references`` resolves each to what the event was, in the
+    same cited order, with an unresolved reference for any missing id.
 
     The model is a phrasing layer, not the product, so it is never allowed to fail
     the summary. When it returns no usable text, or when the provider cannot produce
@@ -270,7 +282,9 @@ def generate_incident_summary(
     occurred. On an outage the provider that was asked is recorded as the model, so
     even a degraded summary traces to where its prose should have come from.
     """
+    events = list(events)
     timeline = build_incident_timeline(incident, events)
+    references = build_source_references(incident.event_ids, events)
     request = CompletionRequest(
         instructions=instructions,
         input=render_incident_material(incident, timeline, excluded_fields=excluded_fields),
@@ -317,6 +331,7 @@ def generate_incident_summary(
         started_at=timeline.started_at,
         ended_at=timeline.ended_at,
         source_event_ids=list(incident.event_ids),
+        references=references,
         missing_event_ids=timeline.missing_event_ids,
         notes=notes,
     )
