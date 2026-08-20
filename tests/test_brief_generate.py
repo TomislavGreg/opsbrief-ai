@@ -12,6 +12,7 @@ from opsbrief.brief import (
 )
 from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render_context
 from opsbrief.events import EventSeverity, EventStatus
+from opsbrief.references import SourceReference
 from opsbrief.risks import Risk, RiskSeverity
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -69,6 +70,28 @@ def test_structured_facts_are_carried_from_the_context_not_the_model() -> None:
     assert brief.risks == context.risks
     assert brief.source_event_ids == context.source_event_ids == ["e04"]
     assert brief.notes == ["Showing the 1 most recent of 9 events."]
+
+
+def test_references_are_carried_from_the_context_onto_the_brief() -> None:
+    context = make_context()
+    context.references = [
+        SourceReference(
+            event_id="e04",
+            resolved=True,
+            source="safety",
+            event_type="inspection.overdue",
+            subject="Safety inspection for North Stand is overdue",
+            occurred_at=NOW,
+            severity=EventSeverity.HIGH,
+            status=EventStatus.OVERDUE,
+        )
+    ]
+    provider = FakeAIProvider(responses=["A summary."])
+
+    brief = generate_brief(context, provider)
+
+    assert brief.references == context.references
+    assert [reference.event_id for reference in brief.references] == brief.source_event_ids
 
 
 def test_generated_brief_records_the_prompt_and_output_versions() -> None:

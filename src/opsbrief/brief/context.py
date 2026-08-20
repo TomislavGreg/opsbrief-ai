@@ -12,8 +12,9 @@ same context.
 from collections.abc import Sequence
 from datetime import datetime
 
-from opsbrief.brief.schema import BriefContext, EventDigest
+from opsbrief.brief.schema import BriefContext, EventDigest, collect_source_event_ids
 from opsbrief.events import Event, as_utc
+from opsbrief.references import build_source_references
 from opsbrief.risks import Risk, default_rules, detect_risks, prioritize
 
 #: How many recent events a brief context carries by default. The view is bounded
@@ -85,10 +86,12 @@ def build_brief_context(
     reference = as_utc(now)
     risks = prioritize(detect_risks(events, default_rules(reference)))
     recent = [_digest(event) for event in _order_newest_first(events)[:max_recent_events]]
+    references = build_source_references(collect_source_event_ids(risks, recent), events)
     return BriefContext(
         generated_at=reference,
         event_count=len(events),
         risks=risks,
         recent_events=recent,
         notes=_notes(len(events), risks, len(recent)),
+        references=references,
     )

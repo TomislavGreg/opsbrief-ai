@@ -69,6 +69,28 @@ def test_risks_are_judged_over_all_events_not_just_recent() -> None:
     assert context.source_event_ids[0] == "late"
 
 
+def test_references_resolve_every_source_event_id_in_the_same_order() -> None:
+    events = [
+        make_event("late", due_at=NOW - timedelta(hours=2), subject="Overdue safety check"),
+        make_event("recent", occurred_at=NOW - timedelta(minutes=5)),
+    ]
+
+    context = build_brief_context(events, NOW)
+
+    # One reference per source event id, in the same order, each resolved.
+    assert [reference.event_id for reference in context.references] == context.source_event_ids
+    assert all(reference.resolved for reference in context.references)
+    by_id = {reference.event_id: reference for reference in context.references}
+    assert by_id["late"].subject == "Overdue safety check"
+    assert by_id["late"].source == "tasks"
+
+
+def test_no_events_yields_no_references() -> None:
+    context = build_brief_context([], NOW)
+
+    assert context.references == []
+
+
 def test_no_risks_over_benign_events_is_noted() -> None:
     events = [make_event("ok", due_at=NOW + timedelta(days=1))]
 

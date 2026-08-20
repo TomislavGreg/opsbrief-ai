@@ -175,4 +175,5 @@ def generate_brief(
         risks=context.risks,
         notes=notes,
         source_event_ids=context.source_event_ids,
+        references=context.references,
     )
