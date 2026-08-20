@@ -1458,7 +1458,7 @@ started only once the API and core services are stable.
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
-| AI-052 | Add source references to generated output | Safety and explainability | Ready |
+| AI-052 | Add source references to generated output | Safety and explainability | In Progress |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Backlog |
 | AI-054 | Add structured generation audit records | Safety and explainability | Backlog |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Backlog |
