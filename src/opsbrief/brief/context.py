@@ -16,6 +16,7 @@ from opsbrief.brief.schema import BriefContext, EventDigest, collect_source_even
 from opsbrief.events import Event, as_utc
 from opsbrief.references import build_source_references
 from opsbrief.risks import Risk, default_rules, detect_risks, prioritize
+from opsbrief.warnings import GenerationWarning, WarningCode
 
 #: How many recent events a brief context carries by default. The view is bounded
 #: so the eventual prompt stays small no matter how much history the store holds.
@@ -45,24 +46,43 @@ def _order_newest_first(events: Sequence[Event]) -> list[Event]:
     return sorted(by_id, key=lambda event: event.occurred_at, reverse=True)
 
 
-def _notes(event_count: int, risks: Sequence[Risk], shown: int) -> list[str]:
+def _warnings(event_count: int, risks: Sequence[Risk], shown: int) -> list[GenerationWarning]:
     """Describe where the picture is incomplete, so a brief can say so plainly.
 
-    Each note is a deterministic statement of fact about the material, not a
+    Each warning is a deterministic statement of fact about the material, not a
     judgement: no events to draw on, no risks found, or a recent-events view that
-    omits older events because it is bounded.
+    omits older events because it is bounded. A warning carries a machine-readable
+    code alongside the human message a note shows, so the two never disagree and a
+    consumer can branch on the code.
     """
     if event_count == 0:
-        return ["No operational events have been recorded, so the brief has no source data."]
-    notes: list[str] = []
+        return [
+            GenerationWarning(
+                code=WarningCode.NO_EVENTS,
+                message=(
+                    "No operational events have been recorded, so the brief has no source data."
+                ),
+            )
+        ]
+    warnings: list[GenerationWarning] = []
     if not risks:
-        notes.append(f"No risks were detected across the {event_count} events considered.")
-    if shown < event_count:
-        notes.append(
-            f"Showing the {shown} most recent of {event_count} events; "
-            "older events are omitted from the brief context."
+        warnings.append(
+            GenerationWarning(
+                code=WarningCode.NO_RISKS,
+                message=f"No risks were detected across the {event_count} events considered.",
+            )
         )
-    return notes
+    if shown < event_count:
+        warnings.append(
+            GenerationWarning(
+                code=WarningCode.EVENTS_OMITTED,
+                message=(
+                    f"Showing the {shown} most recent of {event_count} events; "
+                    "older events are omitted from the brief context."
+                ),
+            )
+        )
+    return warnings
 
 
 def build_brief_context(
@@ -87,11 +107,13 @@ def build_brief_context(
     risks = prioritize(detect_risks(events, default_rules(reference)))
     recent = [_digest(event) for event in _order_newest_first(events)[:max_recent_events]]
     references = build_source_references(collect_source_event_ids(risks, recent), events)
+    warnings = _warnings(len(events), risks, len(recent))
     return BriefContext(
         generated_at=reference,
         event_count=len(events),
         risks=risks,
         recent_events=recent,
-        notes=_notes(len(events), risks, len(recent)),
+        notes=[warning.message for warning in warnings],
+        warnings=warnings,
         references=references,
     )
