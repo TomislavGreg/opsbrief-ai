@@ -9,9 +9,12 @@ from opsbrief.incidents import (
     INCIDENT_SUMMARY_OUTPUT_VERSION,
     INCIDENT_SUMMARY_PROMPT_VERSION,
     MAX_INCIDENT_SUMMARY_LENGTH,
+    Confidence,
+    GenerationWarning,
     IncidentSeverity,
     IncidentStatus,
     IncidentSummary,
+    WarningCode,
 )
 
 NOW = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
@@ -61,6 +64,18 @@ def test_a_summary_carries_its_incident_details_and_evidence() -> None:
     assert summary.severity is IncidentSeverity.HIGH
     assert summary.source_event_ids == ["e17", "e18"]
     assert summary.missing_event_ids == ["e19"]
+
+
+def test_confidence_is_derived_from_the_warnings() -> None:
+    # No warnings reads as full confidence; a missing-evidence warning lowers it,
+    # and the two never disagree because confidence is computed from the warnings.
+    assert make_summary().confidence is Confidence.HIGH
+
+    degraded = make_summary(
+        warnings=[GenerationWarning(code=WarningCode.MISSING_EVENTS, message="1 cited event gone.")]
+    )
+    assert degraded.confidence is Confidence.LOW
+    assert degraded.model_dump()["confidence"] == "low"
 
 
 def test_an_empty_summary_is_allowed() -> None:
