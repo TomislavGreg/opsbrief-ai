@@ -39,6 +39,7 @@ from opsbrief.incidents.timeline import (
     TimelineEntry,
     build_incident_timeline,
 )
+from opsbrief.warnings import Confidence, GenerationWarning, WarningCode
 
 __all__ = [
     "ACTIVE_STATUSES",
@@ -52,6 +53,8 @@ __all__ = [
     "MAX_RESOLUTION_NOTE_LENGTH",
     "RISK_TO_INCIDENT_SEVERITY",
     "TERMINAL_STATUSES",
+    "Confidence",
+    "GenerationWarning",
     "Incident",
     "IncidentClosedError",
     "IncidentDeclaration",
@@ -65,6 +68,7 @@ __all__ = [
     "IncidentTimeline",
     "InvalidIncidentTransition",
     "TimelineEntry",
+    "WarningCode",
     "build_incident_timeline",
     "can_transition",
     "declare_incident_from_risk",

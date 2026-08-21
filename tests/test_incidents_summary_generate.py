@@ -14,6 +14,7 @@ from opsbrief.incidents import (
     generate_incident_summary,
 )
 from opsbrief.incidents.summary import DEFAULT_INCIDENT_INSTRUCTIONS
+from opsbrief.warnings import Confidence, WarningCode
 
 NOW = datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
 
@@ -180,6 +181,49 @@ def test_a_missing_cited_id_becomes_an_unresolved_reference() -> None:
     assert by_id["e1"].resolved is True
     assert by_id["e2"].resolved is False
     assert by_id["e2"].subject is None
+
+
+def test_a_complete_summary_has_full_confidence_and_no_warnings() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+    incident = make_incident(["e1", "e2"])
+    events = [make_event("e1", minutes_ago=90), make_event("e2", minutes_ago=10)]
+
+    result = generate_incident_summary(incident, events, provider)
+
+    assert result.warnings == []
+    assert result.confidence is Confidence.HIGH
+
+
+def test_a_missing_cited_event_warns_and_lowers_confidence() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+    incident = make_incident(["e1", "e2"])
+
+    result = generate_incident_summary(incident, [make_event("e1", minutes_ago=20)], provider)
+
+    assert [warning.code for warning in result.warnings] == [WarningCode.MISSING_EVENTS]
+    assert result.warnings[0].message in result.notes
+    assert result.confidence is Confidence.LOW
+
+
+def test_no_cited_event_resolving_leaves_no_confidence() -> None:
+    # Every cited event is gone, so there is no timeline to describe at all.
+    provider = FakeAIProvider(responses=["A summary."])
+    incident = make_incident(["gone1", "gone2"])
+
+    result = generate_incident_summary(incident, [make_event("other")], provider)
+
+    codes = [warning.code for warning in result.warnings]
+    assert WarningCode.NO_TIMELINE in codes
+    assert result.confidence is Confidence.NONE
+
+
+def test_a_provider_failure_warns_and_lowers_confidence() -> None:
+    incident = make_incident(["e1"])
+
+    result = generate_incident_summary(incident, [make_event("e1")], FailingProvider())
+
+    assert [warning.code for warning in result.warnings] == [WarningCode.MODEL_UNAVAILABLE]
+    assert result.confidence is Confidence.MEDIUM
 
 
 def test_the_request_is_bounded_and_records_the_rendered_material() -> None:

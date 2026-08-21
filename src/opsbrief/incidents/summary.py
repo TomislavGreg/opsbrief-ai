@@ -19,7 +19,7 @@ import re
 from collections.abc import Container, Iterable, Sequence
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
@@ -33,6 +33,7 @@ from opsbrief.incidents.timeline import (
     build_incident_timeline,
 )
 from opsbrief.references import SourceReference, build_source_references
+from opsbrief.warnings import Confidence, GenerationWarning, WarningCode, assess_confidence
 
 #: Upper bound, in characters, on an incident summary's model-phrased text. The
 #: summary is untrusted model output, so it is constrained to a bounded length
@@ -44,7 +45,7 @@ MAX_INCIDENT_SUMMARY_LENGTH = 1_000
 #: and a stored summary stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`IncidentSummary` change in a way a consumer would
 #: need to notice.
-INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/2"
+INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/3"
 
 #: Version of the prompt an incident summary was produced with: the instructions
 #: and the material rendering in this module. Every summary records it, so its
@@ -73,7 +74,11 @@ class IncidentSummary(BaseModel):
     answered to is carried as an unresolved reference, matching
     ``missing_event_ids``. ``model`` names
     the model that produced the summary, so a generated statement traces to its
-    model just as an incident traces to its events. ``output_version`` names the
+    model just as an incident traces to its events. Where the picture is
+    incomplete or unphrased, the summary says so twice over: ``notes`` in prose and
+    ``warnings`` as structured, machine-readable records, and ``confidence`` sums
+    those warnings into a single level a reader can weigh the summary by.
+    ``output_version`` names the
     shape it was produced in and ``prompt_version`` the prompt that phrased it, so a
     stored summary stays interpretable and a change in structure or phrasing stays
     visible.
@@ -145,6 +150,24 @@ class IncidentSummary(BaseModel):
         default_factory=list,
         description="Where the picture is incomplete, for example missing events or no summary.",
     )
+    warnings: list[GenerationWarning] = Field(
+        default_factory=list,
+        description="The same gaps as structured, machine-readable warnings, in note order.",
+    )
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="How much of the picture stands, derived from the warnings.",
+    )
+    @property
+    def confidence(self) -> Confidence:
+        """Return the confidence the summary's warnings imply.
+
+        It is derived from ``warnings`` rather than stored, so it can never
+        disagree with the gaps the summary reports: a summary with no gap is
+        ``high``, one missing some cited evidence is ``low``, and one whose cited
+        events none resolve, leaving no timeline to describe, is ``none``.
+        """
+        return assess_confidence(self.warnings)
 
 
 #: The task the model performs, phrased by the service. It asks only for prose:
@@ -278,9 +301,12 @@ def generate_incident_summary(
     The model is a phrasing layer, not the product, so it is never allowed to fail
     the summary. When it returns no usable text, or when the provider cannot produce
     one at all (a transport error, a timeout, an unparseable reply), the summary is
-    still produced from the deterministic picture and a note records which gap
-    occurred. On an outage the provider that was asked is recorded as the model, so
-    even a degraded summary traces to where its prose should have come from.
+    still produced from the deterministic picture and a note and a matching warning
+    record which gap occurred. Those warnings, the missing-evidence gaps plus any
+    the model added, are summed into the summary's ``confidence``, so a reader can
+    weigh a degraded summary at a glance. On an outage the provider that was asked
+    is recorded as the model, so even a degraded summary traces to where its prose
+    should have come from.
     """
     events = list(events)
     timeline = build_incident_timeline(incident, events)
@@ -291,11 +317,23 @@ def generate_incident_summary(
         max_output_tokens=max_output_tokens,
     )
     notes: list[str] = []
+    warnings: list[GenerationWarning] = []
     if timeline.missing_event_ids:
-        notes.append(
+        message = (
             f"{len(timeline.missing_event_ids)} cited event(s) no longer resolve "
             "to a stored record."
         )
+        notes.append(message)
+        warnings.append(GenerationWarning(code=WarningCode.MISSING_EVENTS, message=message))
+    if timeline.started_at is None:
+        # Every cited event is missing, so there is no timeline to describe at all:
+        # a stronger gap than some cited events resolving and some not.
+        message = (
+            "No cited event resolved to a stored record, so the summary has no "
+            "timeline to describe."
+        )
+        notes.append(message)
+        warnings.append(GenerationWarning(code=WarningCode.NO_TIMELINE, message=message))
 
     try:
         response = provider.complete(request)
@@ -305,18 +343,22 @@ def generate_incident_summary(
         # recorded as the provider that was asked, so the gap stays traceable.
         summary = ""
         model = provider.name
-        notes.append(
+        message = (
             "The model was unavailable, so the incident summary reports the "
             "deterministic picture only."
         )
+        notes.append(message)
+        warnings.append(GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message=message))
     else:
         summary = _constrain_summary(response.text)
         model = response.model
         if not summary:
-            notes.append(
+            message = (
                 "The model returned no summary; the incident summary reports the "
                 "deterministic picture only."
             )
+            notes.append(message)
+            warnings.append(GenerationWarning(code=WarningCode.EMPTY_SUMMARY, message=message))
 
     return IncidentSummary(
         incident_id=incident.id,
@@ -334,4 +376,5 @@ def generate_incident_summary(
         references=references,
         missing_event_ids=timeline.missing_event_ids,
         notes=notes,
+        warnings=warnings,
     )
