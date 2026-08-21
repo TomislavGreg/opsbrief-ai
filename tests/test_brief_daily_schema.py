@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from opsbrief.brief import BRIEF_OUTPUT_VERSION, MAX_SUMMARY_LENGTH, DailyBrief
 from opsbrief.risks import Risk, RiskSeverity
+from opsbrief.warnings import Confidence, GenerationWarning, WarningCode
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
 
@@ -34,6 +35,24 @@ def test_daily_brief_carries_summary_and_structured_facts() -> None:
     assert brief.model == "fake"
     assert brief.risks[0].rule == "overdue_work"
     assert brief.source_event_ids == ["e04"]
+
+
+def test_confidence_is_derived_from_the_warnings() -> None:
+    # No warnings reads as full confidence; a warning lowers it, and the two never
+    # disagree because confidence is computed from the warnings rather than stored.
+    clear = DailyBrief(generated_at=NOW, summary="ok", model="fake", risks=[])
+    assert clear.confidence is Confidence.HIGH
+
+    partial = DailyBrief(
+        generated_at=NOW,
+        summary="",
+        model="fake",
+        risks=[],
+        warnings=[GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message="down")],
+    )
+    assert partial.confidence is Confidence.MEDIUM
+    # The computed level is serialised alongside the stored fields.
+    assert partial.model_dump()["confidence"] == "medium"
 
 
 def test_summary_may_be_empty() -> None:

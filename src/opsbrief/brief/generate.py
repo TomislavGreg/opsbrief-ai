@@ -28,6 +28,7 @@ from opsbrief.brief.schema import (
 )
 from opsbrief.exclusion import shown_value
 from opsbrief.risks import Risk
+from opsbrief.warnings import GenerationWarning, WarningCode
 
 #: The task the model performs, phrased by the service. It asks only for prose:
 #: the model summarises the picture and never decides what it contains. Changing
@@ -137,9 +138,12 @@ def generate_brief(
     fail the brief. When it returns no usable summary, or when the provider
     cannot produce one at all (a transport error, a timeout, an unparseable
     reply), the brief is still produced from the deterministic picture and a note
-    records which gap occurred. The brief records the prompt and output versions
-    it was produced with, so a summary traces to the exact prompt behind it and a
-    consumer can detect a change in either.
+    and a matching warning record which gap occurred. Those warnings, the
+    context's own plus any the model added, are summed into the brief's
+    ``confidence``, so a reader can weigh a degraded brief at a glance. The brief
+    records the prompt and output versions it was produced with, so a summary
+    traces to the exact prompt behind it and a consumer can detect a change in
+    either.
     """
     request = CompletionRequest(
         instructions=instructions,
@@ -147,6 +151,7 @@ def generate_brief(
         max_output_tokens=max_output_tokens,
     )
     notes = list(context.notes)
+    warnings = list(context.warnings)
     try:
         response = provider.complete(request)
     except AIProviderError:
@@ -155,16 +160,18 @@ def generate_brief(
         # is recorded as the provider that was asked, so the gap stays traceable.
         summary = ""
         model = provider.name
-        notes.append(
-            "The model was unavailable, so the brief reports the deterministic picture only."
-        )
+        message = "The model was unavailable, so the brief reports the deterministic picture only."
+        notes.append(message)
+        warnings.append(GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message=message))
     else:
         summary = _constrain_summary(response.text)
         model = response.model
         if not summary:
-            notes.append(
+            message = (
                 "The model returned no summary; the brief reports the deterministic picture only."
             )
+            notes.append(message)
+            warnings.append(GenerationWarning(code=WarningCode.EMPTY_SUMMARY, message=message))
 
     return DailyBrief(
         generated_at=context.generated_at,
@@ -174,6 +181,7 @@ def generate_brief(
         prompt_version=BRIEF_PROMPT_VERSION,
         risks=context.risks,
         notes=notes,
+        warnings=warnings,
         source_event_ids=context.source_event_ids,
         references=context.references,
     )
