@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk
+from opsbrief.warnings import GenerationWarning
 
 #: Upper bound, in characters, on a brief's model-phrased summary. The summary is
 #: untrusted model output, so it is constrained to a bounded length before it is
@@ -141,6 +142,10 @@ class BriefContext(BaseModel):
     notes: list[str] = Field(
         default_factory=list,
         description="Where the picture is incomplete, for example no events or no risks.",
+    )
+    warnings: list[GenerationWarning] = Field(
+        default_factory=list,
+        description="The same gaps as structured, machine-readable warnings, in note order.",
     )
     references: list[SourceReference] = Field(
         default_factory=list,

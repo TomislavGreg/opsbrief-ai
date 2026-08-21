@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from opsbrief.brief import DEFAULT_RECENT_EVENTS, build_brief_context
 from opsbrief.events import Event, EventInput, EventSeverity, EventStatus
+from opsbrief.warnings import WarningCode
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
 
@@ -98,6 +99,46 @@ def test_no_risks_over_benign_events_is_noted() -> None:
 
     assert context.risks == []
     assert context.notes == ["No risks were detected across the 1 events considered."]
+
+
+def test_warnings_mirror_the_notes_with_machine_readable_codes() -> None:
+    # Every note has a matching warning in the same order, so the two never disagree.
+    context = build_brief_context([], NOW)
+
+    assert [warning.message for warning in context.warnings] == context.notes
+    assert [warning.code for warning in context.warnings] == [WarningCode.NO_EVENTS]
+
+
+def test_no_risks_warning_carries_the_no_risks_code() -> None:
+    events = [make_event("ok", due_at=NOW + timedelta(days=1))]
+
+    context = build_brief_context(events, NOW)
+
+    assert [warning.code for warning in context.warnings] == [WarningCode.NO_RISKS]
+
+
+def test_a_bounded_view_warns_that_events_are_omitted() -> None:
+    events = [
+        make_event(f"e{index:02d}", occurred_at=NOW - timedelta(minutes=index))
+        for index in range(5)
+    ]
+
+    context = build_brief_context(events, NOW, max_recent_events=2)
+
+    # Benign events raise no risk, so both a no-risks and an omitted-events warning.
+    assert [warning.code for warning in context.warnings] == [
+        WarningCode.NO_RISKS,
+        WarningCode.EVENTS_OMITTED,
+    ]
+
+
+def test_a_clean_full_picture_has_no_warnings() -> None:
+    events = [make_event("late", due_at=NOW - timedelta(hours=2))]
+
+    context = build_brief_context(events, NOW)
+
+    assert context.warnings == []
+    assert context.notes == []
 
 
 def test_recent_events_are_newest_first_and_carry_the_digest_fields() -> None:
