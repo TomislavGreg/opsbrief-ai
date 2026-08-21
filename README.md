@@ -170,6 +170,14 @@ produced it.
   cited event up separately, and a cited id no stored event answers to is carried
   as a visible unresolved reference rather than dropped. Resolution is
   deterministic and holds no model involvement.
+- Confidence and missing-data warnings on generated output: a daily brief and an
+  incident summary carry the gaps in their picture as structured `warnings`, each
+  pairing a machine-readable code (no events, no risks, events omitted, missing
+  events, no timeline, model unavailable, empty summary) with the same human
+  message the notes show, and a `confidence` level (`high`, `medium`, `low` or
+  `none`) derived from those warnings, so a reader can weigh the output at a glance
+  and a consumer can branch on a code instead of parsing prose. The warnings and
+  the confidence are deterministic and hold no model involvement.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -492,8 +500,9 @@ prioritized `risks`, the `notes` on where the picture is incomplete, and the
   "generated_at": "2026-07-29T18:00:00Z",
   "summary": "One integration keeps failing and a safety inspection is overdue; deal with the ticketing failures first.",
   "model": "fake-1",
-  "output_version": "daily-brief/2",
+  "output_version": "daily-brief/3",
   "prompt_version": "brief-prompt/1",
+  "confidence": "high",
   "risks": [
     {
       "rule": "repeated_integration_failure",
@@ -511,6 +520,7 @@ prioritized `risks`, the `notes` on where the picture is incomplete, and the
     }
   ],
   "notes": [],
+  "warnings": [],
   "source_event_ids": ["e17", "e18", "e19", "e20", "e21", "e04"],
   "references": [
     {
@@ -537,10 +547,15 @@ is carried from the deterministic context, as described under
 provider, which reports itself as `fake-1`. The model is only a phrasing layer,
 so it never fails the brief: when it returns no usable summary, or when the
 provider is unavailable, the endpoint still answers with the deterministic
-picture and a note recording which gap occurred, rather than an error.
-`output_version` names the shape the brief was produced in and
-`prompt_version` the prompt that phrased its summary, so a stored or piped brief
-stays interpretable and a change in either stays visible.
+picture and a note recording which gap occurred, rather than an error. Wherever
+the picture is incomplete or unphrased, the brief says so twice: `notes` in prose
+and `warnings` as structured records a consumer can branch on, with `confidence`
+summing those warnings into a single level (`high`, `medium`, `low` or `none`)
+the brief can be weighed by, as described under
+[Confidence and Warnings](#confidence-and-warnings). `output_version` names the
+shape the brief was produced in and `prompt_version` the prompt that phrased its
+summary, so a stored or piped brief stays interpretable and a change in either
+stays visible.
 
 Declare an incident to track:
 
@@ -876,9 +891,47 @@ A daily brief and an incident summary both carry a `references` list next to the
 flat `source_event_ids`: one reference per cited id, in the same order, so the two
 stay in step. Resolution is deterministic and holds no model involvement, exactly
 like the evidence it describes, so a reference never invents or reshapes what an
-event was. Because the structure of the generated output changed, `GET /brief`
-now reports `output_version` `daily-brief/2` and an incident summary reports
-`incident-summary/2`.
+event was.
+
+## Confidence and Warnings
+
+A generated output is only as trustworthy as the material behind it. Some of the
+picture may be missing (a cited event that no longer resolves, older events left
+out because the view is bounded) or unphrased (the model was unavailable, or
+returned nothing). A daily brief and an incident summary already carry `notes`
+saying so in prose. Confidence and warnings state the same gaps in a form a
+consumer can act on without parsing text.
+
+```python
+from opsbrief.warnings import Confidence, WarningCode
+
+brief.warnings[0].code  # WarningCode.NO_RISKS
+brief.warnings[0].message  # the same text the matching note carries
+brief.confidence is Confidence.HIGH  # the level, derived from the warnings
+```
+
+Each `GenerationWarning` pairs a machine-readable `WarningCode` with the human
+message the note beside it shows, so the two never disagree and a consumer can
+branch on the code. The codes name one gap each: `no_events` and `no_risks` on a
+brief, `events_omitted` when the recent-events view is bounded, `missing_events`
+and `no_timeline` on an incident summary whose cited events no longer resolve, and
+`model_unavailable` or `empty_summary` when the model did not phrase the picture.
+
+`confidence` sums those warnings into a single level, derived from them rather than
+stored, so it can never disagree with the gaps the output reports:
+
+| Level | Meaning |
+|-------|---------|
+| `high` | No gap: the picture is complete and phrased. |
+| `medium` | Partial or unphrased: some events omitted, or no model summary. |
+| `low` | A gap in the cited evidence: some cited events no longer resolve. |
+| `none` | No source data to describe: an empty store, or an incident whose cited events all vanished. |
+
+An all-clear picture stays `high`: `no_risks` is good news, not a gap, so it does
+not lower confidence. Both the warnings and the level are deterministic and hold
+no model involvement, like the evidence they describe. Because the generated
+output gained these fields, `GET /brief` reports `output_version` `daily-brief/3`
+and an incident summary reports `incident-summary/3`.
 
 ## Sample Data
 
@@ -1161,6 +1214,8 @@ brief.output_version  # the shape the brief was produced in
 brief.prompt_version  # the prompt that phrased the summary
 brief.risks  # the current risks, carried over from the context
 brief.notes  # where the picture is incomplete
+brief.warnings  # the same gaps as structured, machine-readable records
+brief.confidence  # how much of the picture stands, derived from the warnings
 brief.source_event_ids  # every event id the brief traces back to
 brief.references  # each of those ids resolved to what the event was
 ```
@@ -1381,6 +1436,8 @@ summary.source_event_ids  # the incident's cited events, in cited order
 summary.references  # each cited id resolved to what the event was
 summary.missing_event_ids  # cited IDs no stored event answered to
 summary.notes  # where the picture is incomplete
+summary.warnings  # the same gaps as structured, machine-readable records
+summary.confidence  # how much of the picture stands, derived from the warnings
 ```
 
 Only the `summary` comes from the model, and it is treated as untrusted: it is
@@ -1513,8 +1570,8 @@ started only once the API and core services are stable.
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
-| AI-053 | Add confidence and missing-data warnings | Safety and explainability | In Progress |
-| AI-054 | Add structured generation audit records | Safety and explainability | Backlog |
+| AI-053 | Add confidence and missing-data warnings | Safety and explainability | Done |
+| AI-054 | Add structured generation audit records | Safety and explainability | Ready |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Backlog |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
@@ -1535,11 +1592,13 @@ Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 No tickets are currently blocked. Phase 4 (Incident intelligence) is complete,
 and Phase 5 (Safety and explainability) is under way: sensitive metadata values
 are redacted before storage, a deployment can hold configured event fields back
-from the material a model is shown, and every generated output now resolves each
-cited event id to a descriptive source reference. The next Ready ticket is AI-053
-(confidence and missing-data warnings), which makes a generated output state how
-much of the picture is uncertain or missing. When a ticket's dependencies are
-complete, promote it to Ready so the next change has a clear starting point.
+from the material a model is shown, every generated output resolves each cited
+event id to a descriptive source reference, and a brief and an incident summary
+now state how much of the picture is uncertain or missing through structured
+warnings and a confidence level. The next Ready ticket is AI-054 (structured
+generation audit records), which records what each generated output was produced
+from and by. When a ticket's dependencies are complete, promote it to Ready so
+the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1550,6 +1609,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-21 - Added confidence and missing-data warnings to generated output: a daily brief and an incident summary carry the gaps in their picture as structured `warnings`, each pairing a machine-readable code with the message the note beside it shows, and a `confidence` level derived from those warnings, bumping the brief and incident-summary output versions.
 - 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
 - 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
 - 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
@@ -1563,7 +1623,6 @@ it is not picked up and left half-finished.
 - 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
 - 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
 - 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
-- 2026-08-11 — Added the `opsbrief` command-line entry point: it generates the current daily brief over the configured event store and prints it as a readable text block or as the brief's exact JSON, without running the server.
 
 ## Future Game Center Integration
 
