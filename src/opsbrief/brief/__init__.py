@@ -17,6 +17,7 @@ from opsbrief.brief.schema import (
     DailyBrief,
     EventDigest,
 )
+from opsbrief.warnings import Confidence, GenerationWarning, WarningCode
 
 __all__ = [
     "BRIEF_OUTPUT_VERSION",
@@ -25,8 +26,11 @@ __all__ = [
     "DEFAULT_RECENT_EVENTS",
     "MAX_SUMMARY_LENGTH",
     "BriefContext",
+    "Confidence",
     "DailyBrief",
     "EventDigest",
+    "GenerationWarning",
+    "WarningCode",
     "build_brief_context",
     "generate_brief",
     "render_context",

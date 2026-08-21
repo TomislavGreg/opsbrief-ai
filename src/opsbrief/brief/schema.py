@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk
-from opsbrief.warnings import GenerationWarning
+from opsbrief.warnings import Confidence, GenerationWarning, assess_confidence
 
 #: Upper bound, in characters, on a brief's model-phrased summary. The summary is
 #: untrusted model output, so it is constrained to a bounded length before it is
@@ -33,7 +33,7 @@ MAX_SUMMARY_LENGTH = 1_000
 #: one and a stored brief stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`DailyBrief` change in a way a consumer would
 #: need to notice.
-BRIEF_OUTPUT_VERSION = "daily-brief/2"
+BRIEF_OUTPUT_VERSION = "daily-brief/3"
 
 #: Version of the prompt a brief's summary was produced with — the instructions
 #: and the context rendering in :mod:`opsbrief.brief.generate`. Every generated
@@ -176,11 +176,15 @@ class DailyBrief(BaseModel):
     ``risks``, the ``notes`` on where the picture is incomplete, and the
     ``source_event_ids`` every claim traces back to — is carried over unchanged
     from the deterministic :class:`BriefContext`, so a model can rephrase the
-    picture but never change what it says. Alongside the flat ``source_event_ids``,
-    ``references`` resolves each of those ids to what the event was, in the same
-    order, so the brief is self-describing and a reader need not look every cited
-    event up separately. ``model`` names the model that produced the summary, so a
-    generated statement traces to its model just as a risk traces to its rule.
+    picture but never change what it says. Where the picture is incomplete or
+    unphrased, the brief says so twice over: ``notes`` in prose and ``warnings`` as
+    structured, machine-readable records, and ``confidence`` sums those warnings
+    into a single level a reader can weigh the brief by. Alongside the flat
+    ``source_event_ids``, ``references`` resolves each of those ids to what the
+    event was, in the same order, so the brief is self-describing and a reader need
+    not look every cited event up separately. ``model`` names the model that
+    produced the summary, so a generated statement traces to its model just as a
+    risk traces to its rule.
     ``output_version`` names the shape the brief was
     produced in, and ``prompt_version`` names the prompt that phrased its summary,
     so a stored or piped brief stays interpretable — and a change in structure or
@@ -220,6 +224,10 @@ class DailyBrief(BaseModel):
         default_factory=list,
         description="Where the picture is incomplete, carried over from the context.",
     )
+    warnings: list[GenerationWarning] = Field(
+        default_factory=list,
+        description="The same gaps as structured, machine-readable warnings, in note order.",
+    )
     source_event_ids: list[str] = Field(
         default_factory=list,
         description="Every source event id the brief traces back to.",
@@ -228,3 +236,17 @@ class DailyBrief(BaseModel):
         default_factory=list,
         description="Each source event id resolved to what the event was, in the same order.",
     )
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="How much of the picture stands, derived from the warnings.",
+    )
+    @property
+    def confidence(self) -> Confidence:
+        """Return the confidence the brief's warnings imply.
+
+        It is derived from ``warnings`` rather than stored, so it can never
+        disagree with the gaps the brief reports: an all-clear brief is ``high``,
+        one merely partial or unphrased is ``medium``, and an empty store is
+        ``none``.
+        """
+        return assess_confidence(self.warnings)

@@ -39,8 +39,9 @@ def render_text(brief: DailyBrief) -> str:
     The summary, the prioritized risks, the notes on where the picture is
     incomplete and the source event IDs behind it are all laid out plainly, each
     risk naming the rule and events it traces to. The header records the model
-    that phrased the summary and the prompt and output versions the brief was
-    produced with, so a reader can trace it. Empty sections say ``none.`` rather
+    that phrased the summary, the prompt and output versions the brief was
+    produced with, and the confidence its warnings imply, so a reader can trace it
+    and weigh it. Empty sections say ``none.`` rather
     than vanishing, so a reader can tell "nothing to report" from a section that
     was simply left out.
     """
@@ -48,6 +49,7 @@ def render_text(brief: DailyBrief) -> str:
         "Daily operations brief",
         f"Generated at {brief.generated_at.isoformat()} by {brief.model}",
         f"Prompt version {brief.prompt_version}; output version {brief.output_version}",
+        f"Confidence: {brief.confidence.value}",
         "",
         "Summary:",
         f"  {brief.summary}" if brief.summary else "  (none)",

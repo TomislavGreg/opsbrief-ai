@@ -40,6 +40,9 @@ def test_no_events_gives_a_brief_that_reports_the_gap(client: TestClient) -> Non
     assert body["generated_at"]
     assert isinstance(body["summary"], str)
     assert any("no source data" in note.lower() for note in body["notes"])
+    # The gap is also reported structurally: a no-events warning and no confidence.
+    assert [warning["code"] for warning in body["warnings"]] == ["no_events"]
+    assert body["confidence"] == "none"
 
 
 def test_brief_carries_the_risks_and_traces_to_their_events(client: TestClient) -> None:

@@ -9,11 +9,13 @@ from opsbrief.brief import (
     MAX_SUMMARY_LENGTH,
     BriefContext,
     EventDigest,
+    build_brief_context,
 )
 from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render_context
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk, RiskSeverity
+from opsbrief.warnings import Confidence, WarningCode
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
 
@@ -138,6 +140,37 @@ def test_an_empty_summary_still_yields_a_brief_and_is_noted() -> None:
     assert brief.risks == [make_risk()]
     assert "existing note" in brief.notes
     assert any("returned no summary" in note for note in brief.notes)
+
+
+def test_a_clean_brief_has_full_confidence_and_no_warnings() -> None:
+    brief = generate_brief(make_context(), FakeAIProvider(responses=["A summary."]))
+
+    assert brief.warnings == []
+    assert brief.confidence is Confidence.HIGH
+
+
+def test_a_provider_failure_warns_and_lowers_confidence() -> None:
+    brief = generate_brief(make_context(), FailingProvider())
+
+    assert [warning.code for warning in brief.warnings] == [WarningCode.MODEL_UNAVAILABLE]
+    # The message still matches the note it mirrors.
+    assert brief.warnings[0].message in brief.notes
+    assert brief.confidence is Confidence.MEDIUM
+
+
+def test_an_empty_summary_warns_and_lowers_confidence() -> None:
+    brief = generate_brief(make_context(), FakeAIProvider(responses=["   "]))
+
+    assert [warning.code for warning in brief.warnings] == [WarningCode.EMPTY_SUMMARY]
+    assert brief.confidence is Confidence.MEDIUM
+
+
+def test_context_warnings_carry_over_and_drive_confidence() -> None:
+    # An empty store leaves no source data, so the brief reports no confidence.
+    brief = generate_brief(build_brief_context([], NOW), FakeAIProvider(responses=["A summary."]))
+
+    assert [warning.code for warning in brief.warnings] == [WarningCode.NO_EVENTS]
+    assert brief.confidence is Confidence.NONE
 
 
 def test_the_request_is_bounded_and_records_the_rendered_context() -> None:
