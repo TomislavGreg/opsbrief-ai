@@ -22,6 +22,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from opsbrief.brief.schema import DailyBrief
+from opsbrief.incidents.summary import IncidentSummary
 from opsbrief.references import SourceReference
 from opsbrief.warnings import Confidence, WarningCode
 
@@ -145,4 +146,28 @@ def audit_daily_brief(brief: DailyBrief) -> GenerationAudit:
         missing_event_ids=_missing_event_ids(brief.references),
         confidence=brief.confidence,
         warning_codes=[warning.code for warning in brief.warnings],
+    )
+
+
+def audit_incident_summary(summary: IncidentSummary) -> GenerationAudit:
+    """Return the provenance of an incident ``summary`` as a :class:`GenerationAudit`.
+
+    An incident summary is produced for one incident, so the record names that
+    incident as its subject. What the summary was produced from (the incident's cited
+    events, and any that no longer resolved) and by (its model and prompt and output
+    versions), together with the confidence and warning codes it reported, are all
+    carried straight over, so the audit never disagrees with the summary it describes.
+    The missing citations are read off the summary's references, exactly as they are
+    for a brief, so the two kinds of output audit uniformly.
+    """
+    return GenerationAudit(
+        kind=GenerationKind.INCIDENT_SUMMARY,
+        subject_id=summary.incident_id,
+        model=summary.model,
+        prompt_version=summary.prompt_version,
+        output_version=summary.output_version,
+        source_event_ids=list(summary.source_event_ids),
+        missing_event_ids=_missing_event_ids(summary.references),
+        confidence=summary.confidence,
+        warning_codes=[warning.code for warning in summary.warnings],
     )
