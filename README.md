@@ -178,6 +178,14 @@ produced it.
   `none`) derived from those warnings, so a reader can weigh the output at a glance
   and a consumer can branch on a code instead of parsing prose. The warnings and
   the confidence are deterministic and hold no model involvement.
+- Structured generation audit records: a daily brief or an incident summary can be
+  projected into a compact `GenerationAudit` naming what the output was produced
+  from (its source event ids, and any cited id that no longer resolved) and by (the
+  model that phrased it and the prompt and output versions), alongside the
+  confidence and warning codes it reported. The record is a uniform provenance
+  trail across both kinds of output, derived from an already-generated one, so it
+  holds no model involvement of its own and never disagrees with the output it
+  describes.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -933,6 +941,43 @@ no model involvement, like the evidence they describe. Because the generated
 output gained these fields, `GET /brief` reports `output_version` `daily-brief/3`
 and an incident summary reports `incident-summary/3`.
 
+## Generation Audit Records
+
+A daily brief and an incident summary each carry their provenance in their own
+shape: a brief covers the whole event store, a summary covers one incident, and the
+two name their fields a little differently. A generation audit record is a single,
+uniform account of that provenance, so a caller that wants to log or persist what
+was generated, from what, and by what does not have to special-case each kind.
+
+```python
+from opsbrief.audit import audit_daily_brief, audit_incident_summary
+
+brief_audit = audit_daily_brief(brief)  # brief: a generated DailyBrief
+summary_audit = audit_incident_summary(summary)  # summary: an IncidentSummary
+
+brief_audit.source_event_ids  # what the output was produced from, in citation order
+brief_audit.missing_event_ids  # cited ids no stored event answered to at generation
+brief_audit.model  # the model that phrased it
+brief_audit.output_version, brief_audit.prompt_version  # the shape and prompt behind it
+brief_audit.confidence, brief_audit.warning_codes  # how much of the picture stood
+```
+
+A `GenerationAudit` names its `kind` (`daily_brief` or `incident_summary`) and, for
+a summary, the `subject_id` of the incident it describes. Every other field is
+copied from the already-generated output: what it was produced *from* (the
+`source_event_ids` it traces back to and the `missing_event_ids` a stored event no
+longer answered to), what it was produced *by* (the `model`, `prompt_version` and
+`output_version`), and how much of the picture stood (`confidence` and the
+`warning_codes` the output reported). `source_event_count` is derived from the ids,
+so it never disagrees with them.
+
+The record is a projection, not a fresh judgement: it holds no model involvement of
+its own and is a pure function of the output it describes, so the same output always
+yields the same audit. The missing citations are read off the output's source
+references (each cited id resolves to a reference, and the unresolved ones are
+exactly the missing evidence), which is why a brief and a summary audit uniformly
+despite carrying their references in different places.
+
 ## Sample Data
 
 The package ships a small set of synthetic operational events describing one
@@ -1571,8 +1616,8 @@ started only once the API and core services are stable.
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Done |
-| AI-054 | Add structured generation audit records | Safety and explainability | In Progress |
-| AI-055 | Add security review and dependency scanning | Safety and explainability | Backlog |
+| AI-054 | Add structured generation audit records | Safety and explainability | Done |
+| AI-055 | Add security review and dependency scanning | Safety and explainability | Ready |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
 | AI-062 | Add sports-operations example events | Game Center readiness | Backlog |
@@ -1593,12 +1638,14 @@ No tickets are currently blocked. Phase 4 (Incident intelligence) is complete,
 and Phase 5 (Safety and explainability) is under way: sensitive metadata values
 are redacted before storage, a deployment can hold configured event fields back
 from the material a model is shown, every generated output resolves each cited
-event id to a descriptive source reference, and a brief and an incident summary
+event id to a descriptive source reference, a brief and an incident summary
 now state how much of the picture is uncertain or missing through structured
-warnings and a confidence level. The next Ready ticket is AI-054 (structured
-generation audit records), which records what each generated output was produced
-from and by. When a ticket's dependencies are complete, promote it to Ready so
-the next change has a clear starting point.
+warnings and a confidence level, and a generated brief or summary can be projected
+into a uniform audit record naming what it was produced from and by. The next Ready
+ticket is AI-055 (security review and dependency scanning), which closes out Phase 5;
+its dependency-scanning part may need a CI workflow change, which a maintainer applies
+directly, as noted below. When a ticket's dependencies are complete, promote it to
+Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1609,6 +1656,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-22 - Added structured generation audit records: a daily brief or an incident summary can be projected into a compact, uniform `GenerationAudit` naming what the output was produced from (its source and missing event ids) and by (its model and prompt and output versions), alongside the confidence and warning codes it reported, derived from the output and holding no model involvement of its own.
 - 2026-08-21 - Added confidence and missing-data warnings to generated output: a daily brief and an incident summary carry the gaps in their picture as structured `warnings`, each pairing a machine-readable code with the message the note beside it shows, and a `confidence` level derived from those warnings, bumping the brief and incident-summary output versions.
 - 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
 - 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
@@ -1622,7 +1670,6 @@ it is not picked up and left half-finished.
 - 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
 - 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
 - 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
-- 2026-08-11 — Added prompt and output version tracking to generated briefs: every `DailyBrief` records the `prompt_version` behind its summary and the `output_version` of its structure, so a brief traces to its prompt and a consumer can detect a change in either.
 
 ## Future Game Center Integration
 
