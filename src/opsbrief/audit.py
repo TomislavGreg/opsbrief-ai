@@ -16,10 +16,13 @@ wants to log or persist "what was generated, from what, and by what" should not
 have to special-case each one. A :class:`GenerationAudit` is that single shape.
 """
 
+from collections.abc import Sequence
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from opsbrief.brief.schema import DailyBrief
+from opsbrief.references import SourceReference
 from opsbrief.warnings import Confidence, WarningCode
 
 
@@ -109,3 +112,37 @@ class GenerationAudit(BaseModel):
         disagree with the evidence the record names.
         """
         return len(self.source_event_ids)
+
+
+def _missing_event_ids(references: Sequence[SourceReference]) -> list[str]:
+    """Return the cited ids no stored event answered to, in citation order.
+
+    A generated output resolves every cited id into a :class:`SourceReference`, in
+    citation order, marking the ones no stored event answered to as unresolved. The
+    unresolved ones are exactly the missing evidence, so reading them off the
+    references is a single, uniform way to find what was cited but no longer resolves,
+    whichever kind of output produced them.
+    """
+    return [reference.event_id for reference in references if not reference.resolved]
+
+
+def audit_daily_brief(brief: DailyBrief) -> GenerationAudit:
+    """Return the provenance of a generated ``brief`` as a :class:`GenerationAudit`.
+
+    A brief is produced over the whole event store, so the record has no subject. What
+    the brief was produced from (its source event ids, and any cited id that no longer
+    resolved) and by (its model and prompt and output versions), together with the
+    confidence and warning codes it reported, are all carried straight over, so the
+    audit never disagrees with the brief it describes.
+    """
+    return GenerationAudit(
+        kind=GenerationKind.DAILY_BRIEF,
+        subject_id=None,
+        model=brief.model,
+        prompt_version=brief.prompt_version,
+        output_version=brief.output_version,
+        source_event_ids=list(brief.source_event_ids),
+        missing_event_ids=_missing_event_ids(brief.references),
+        confidence=brief.confidence,
+        warning_codes=[warning.code for warning in brief.warnings],
+    )
