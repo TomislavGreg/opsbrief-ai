@@ -1617,7 +1617,7 @@ started only once the API and core services are stable.
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Done |
 | AI-054 | Add structured generation audit records | Safety and explainability | Done |
-| AI-055 | Add security review and dependency scanning | Safety and explainability | Ready |
+| AI-055 | Add security review and dependency scanning | Safety and explainability | In Progress |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
 | AI-062 | Add sports-operations example events | Game Center readiness | Backlog |
