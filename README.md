@@ -1650,7 +1650,7 @@ started only once the API and core services are stable.
 | AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
-| AI-062 | Add sports-operations example events | Game Center readiness | Backlog |
+| AI-062 | Add sports-operations example events | Game Center readiness | In Progress |
 | AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Backlog |
 | AI-065 | Add QC incident example | Game Center readiness | Backlog |
