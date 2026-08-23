@@ -49,9 +49,11 @@ produced it.
   source, type, severity or status and paginated with `limit` and `offset`.
 - A `GET /events/{event_id}` endpoint that returns a single stored event, or
   404 when no event carries that identifier.
-- A set of synthetic operational-event fixtures, loadable as validated event
-  payloads, describing one event day at a venue for use in demos, documentation
-  and later phases.
+- Two sets of synthetic operational-event fixtures, loadable as validated event
+  payloads: a general venue event day, and a sports-operations match day (short
+  stewarding, an overdue pitch inspection, a blocked scoreboard task, a broadcast
+  feed failing repeatedly, a rejected goal-line technology check and a
+  crowd-density alert) for demos, documentation and Game Center readiness work.
 - A deterministic risk contract and rule interface: a `Risk` that names the rule
   and the source event IDs behind it, a `RiskRule` protocol, and a `detect_risks`
   detector that runs a set of rules over stored events.
@@ -1009,11 +1011,12 @@ affected package rather than leaving a finding open.
 
 ## Sample Data
 
-The package ships a small set of synthetic operational events describing one
-event day at a venue: unfilled shifts, an overdue safety inspection, blocked
-work, a ticketing integration failing several times before it recovers, a
-rejected quality check and a power alert. They give demos, documentation and
-later phases realistic material without anyone hand-writing payloads.
+The package ships two small sets of synthetic operational events, both
+describing a single day of activity.
+
+The general venue event day: unfilled shifts, an overdue safety inspection,
+blocked work, a ticketing integration failing several times before it recovers,
+a rejected quality check and a power alert.
 
 ```python
 from opsbrief.samples import load_sample_events
@@ -1021,12 +1024,27 @@ from opsbrief.samples import load_sample_events
 events = load_sample_events()  # Validated EventInput models
 ```
 
-The fixtures are read from `src/opsbrief/samples/events.json` and validated
-through the same contract producers submit against, so a fixture that drifts out
-of line with the schema fails loudly rather than misleading a demo. Each event
-carries an `external_id`, so a batch of them can be resubmitted without creating
-duplicates. The data is entirely fictional: this is a public repository and the
-fixtures contain no private, customer or personal data.
+The sports-operations match day, for Game Center readiness work: short
+stewarding and an unfilled medic post, an overdue pitch inspection, a blocked
+scoreboard calibration, a broadcast feed failing repeatedly without recovering,
+a rejected goal-line technology check and a crowd-density alert. It is shaped so
+the deterministic risk rules recognise it, so it doubles as material for risk and
+brief demos, not just ingestion.
+
+```python
+from opsbrief.samples import load_sample_match_events
+
+events = load_sample_match_events()  # Validated EventInput models
+```
+
+The fixtures are read from `src/opsbrief/samples/events.json` and
+`src/opsbrief/samples/match_events.json` and validated through the same contract
+producers submit against, so a fixture that drifts out of line with the schema
+fails loudly rather than misleading a demo. Each event carries an `external_id`,
+so a batch of them can be resubmitted without creating duplicates, and the two
+sets use distinct ids so they can be loaded side by side. The data is entirely
+fictional: this is a public repository and the fixtures contain no private,
+customer or personal data.
 
 ## Risk Detection
 
@@ -1650,7 +1668,7 @@ started only once the API and core services are stable.
 | AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
-| AI-062 | Add sports-operations example events | Game Center readiness | In Progress |
+| AI-062 | Add sports-operations example events | Game Center readiness | Done |
 | AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Backlog |
 | AI-065 | Add QC incident example | Game Center readiness | Backlog |
@@ -1678,8 +1696,12 @@ by, and the project now carries a security policy (`SECURITY.md`) and a
 AI-056 (run dependency scanning in CI) is Blocked: it needs a change under
 `.github/workflows/`, which the maintenance tooling cannot push, so a maintainer
 applies it directly, as noted below. `pip-audit` can be run locally in the
-meantime, as the Security section describes. With Phase 5 otherwise complete,
-Phase 6 (Game Center readiness) is next; when a ticket's dependencies are
+meantime, as the Security section describes.
+
+Phase 6 (Game Center readiness) is under way: the package now ships a
+sports-operations match-day fixture alongside the general venue set, shaped so
+the risk rules recognise it. The next steps build on it, such as a
+match-operations daily brief example (AI-064). When a ticket's dependencies are
 complete, promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
@@ -1691,6 +1713,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-23 - Added a sports-operations match-day sample fixture alongside the general venue set: `load_sample_match_events` reads and validates a synthetic football match day (short stewarding, an unfilled medic post, an overdue pitch inspection, a blocked scoreboard task, a broadcast feed failing repeatedly and a crowd-density alert), shaped so the deterministic risk rules recognise it, giving Game Center readiness work realistic match-operations material.
 - 2026-08-23 - Added a security policy and dependency scanning: `SECURITY.md` records how to report a vulnerability, which versions are supported and the design choices that keep the service safe, and `pip-audit` ships in the `dev` extra so the installed dependencies can be scanned for known advisories with one command. Automating the scan in CI is tracked separately as it needs a workflow change a maintainer applies.
 - 2026-08-22 - Added structured generation audit records: a daily brief or an incident summary can be projected into a compact, uniform `GenerationAudit` naming what the output was produced from (its source and missing event ids) and by (its model and prompt and output versions), alongside the confidence and warning codes it reported, derived from the output and holding no model involvement of its own.
 - 2026-08-21 - Added confidence and missing-data warnings to generated output: a daily brief and an incident summary carry the gaps in their picture as structured `warnings`, each pairing a machine-readable code with the message the note beside it shows, and a `confidence` level derived from those warnings, bumping the brief and incident-summary output versions.
@@ -1704,7 +1727,6 @@ it is not picked up and left half-finished.
 - 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
 - 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
 - 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
-- 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
 
 ## Future Game Center Integration
 
