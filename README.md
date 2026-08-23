@@ -186,6 +186,10 @@ produced it.
   trail across both kinds of output, derived from an already-generated one, so it
   holds no model involvement of its own and never disagrees with the output it
   describes.
+- A security policy and dependency scanning: `SECURITY.md` records how to report a
+  vulnerability, which versions are supported and the design choices that keep the
+  service safe, and `pip-audit` ships in the `dev` extra so the installed
+  dependencies can be scanned for known advisories with one command.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -978,6 +982,31 @@ references (each cited id resolves to a reference, and the unresolved ones are
 exactly the missing evidence), which is why a brief and a summary audit uniformly
 despite carrying their references in different places.
 
+## Security
+
+The project's full security policy lives in [`SECURITY.md`](SECURITY.md): how to
+report a vulnerability privately, which versions are supported, and the design
+choices that keep the service safe. Several of those choices are described in
+their own sections above, and they hold together as one posture: risk detection
+is deterministic so a model never decides what matters, model output is treated
+as untrusted data, every request body is validated, queries are parameterized,
+sensitive metadata is redacted before storage, the material a model sees can be
+narrowed, and no secrets live in the repository.
+
+Dependencies are kept small and are scanned for known advisories with
+[`pip-audit`](https://pypi.org/project/pip-audit/), which ships in the `dev`
+extra. After installing the development dependencies, scan the environment:
+
+```bash
+pip install -e ".[dev]"
+pip-audit
+```
+
+It checks the installed packages against the Python advisory database and names
+any package with a known vulnerability alongside the version that fixes it. Run
+it before a release and whenever a dependency is added or bumped, and upgrade an
+affected package rather than leaving a finding open.
+
 ## Sample Data
 
 The package ships a small set of synthetic operational events describing one
@@ -1617,7 +1646,8 @@ started only once the API and core services are stable.
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
 | AI-053 | Add confidence and missing-data warnings | Safety and explainability | Done |
 | AI-054 | Add structured generation audit records | Safety and explainability | Done |
-| AI-055 | Add security review and dependency scanning | Safety and explainability | In Progress |
+| AI-055 | Add security review and dependency scanning | Safety and explainability | Done |
+| AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
 | AI-062 | Add sports-operations example events | Game Center readiness | Backlog |
@@ -1634,18 +1664,23 @@ started only once the API and core services are stable.
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
-No tickets are currently blocked. Phase 4 (Incident intelligence) is complete,
-and Phase 5 (Safety and explainability) is under way: sensitive metadata values
-are redacted before storage, a deployment can hold configured event fields back
-from the material a model is shown, every generated output resolves each cited
-event id to a descriptive source reference, a brief and an incident summary
-now state how much of the picture is uncertain or missing through structured
-warnings and a confidence level, and a generated brief or summary can be projected
-into a uniform audit record naming what it was produced from and by. The next Ready
-ticket is AI-055 (security review and dependency scanning), which closes out Phase 5;
-its dependency-scanning part may need a CI workflow change, which a maintainer applies
-directly, as noted below. When a ticket's dependencies are complete, promote it to
-Ready so the next change has a clear starting point.
+Phase 4 (Incident intelligence) is complete, and Phase 5 (Safety and
+explainability) is complete apart from automating dependency scanning in CI:
+sensitive metadata values are redacted before storage, a deployment can hold
+configured event fields back from the material a model is shown, every generated
+output resolves each cited event id to a descriptive source reference, a brief
+and an incident summary now state how much of the picture is uncertain or missing
+through structured warnings and a confidence level, a generated brief or summary
+can be projected into a uniform audit record naming what it was produced from and
+by, and the project now carries a security policy (`SECURITY.md`) and a
+`pip-audit` dependency scan in the `dev` extra.
+
+AI-056 (run dependency scanning in CI) is Blocked: it needs a change under
+`.github/workflows/`, which the maintenance tooling cannot push, so a maintainer
+applies it directly, as noted below. `pip-audit` can be run locally in the
+meantime, as the Security section describes. With Phase 5 otherwise complete,
+Phase 6 (Game Center readiness) is next; when a ticket's dependencies are
+complete, promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1656,6 +1691,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-23 - Added a security policy and dependency scanning: `SECURITY.md` records how to report a vulnerability, which versions are supported and the design choices that keep the service safe, and `pip-audit` ships in the `dev` extra so the installed dependencies can be scanned for known advisories with one command. Automating the scan in CI is tracked separately as it needs a workflow change a maintainer applies.
 - 2026-08-22 - Added structured generation audit records: a daily brief or an incident summary can be projected into a compact, uniform `GenerationAudit` naming what the output was produced from (its source and missing event ids) and by (its model and prompt and output versions), alongside the confidence and warning codes it reported, derived from the output and holding no model involvement of its own.
 - 2026-08-21 - Added confidence and missing-data warnings to generated output: a daily brief and an incident summary carry the gaps in their picture as structured `warnings`, each pairing a machine-readable code with the message the note beside it shows, and a `confidence` level derived from those warnings, bumping the brief and incident-summary output versions.
 - 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
@@ -1669,7 +1705,6 @@ it is not picked up and left half-finished.
 - 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
 - 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
 - 2026-08-12 — Added event linking to incidents: `link_events` and `unlink_events` attach and detach source events without reordering, duplicating or emptying the evidence or touching a closed incident, and `resolve_incident_events` turns an incident's cited IDs into the stored event records they name.
-- 2026-08-12 — Added the incident model and its status lifecycle: an `Incident` groups the source events behind one disruption and moves through `open`, `investigating`, `monitoring`, `resolved` and `closed` by allowed transitions only, refusing a disallowed move.
 
 ## Future Game Center Integration
 
