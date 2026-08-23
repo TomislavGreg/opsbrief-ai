@@ -5,7 +5,7 @@ from datetime import UTC
 from fastapi.testclient import TestClient
 
 from opsbrief.events import EventInput
-from opsbrief.samples import load_sample_events
+from opsbrief.samples import load_sample_events, load_sample_match_events
 
 
 def test_load_returns_validated_event_inputs() -> None:
@@ -51,6 +51,73 @@ def test_repeated_integration_failure_is_present() -> None:
 
 def test_fixtures_ingest_through_the_batch_endpoint(client: TestClient) -> None:
     events = load_sample_events()
+
+    response = client.post(
+        "/events/batch",
+        json={"events": [event.model_dump(mode="json") for event in events]},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["count"] == len(events)
+    assert len(body["events"]) == len(events)
+    assert all(stored["id"] for stored in body["events"])
+
+
+def test_match_load_returns_validated_event_inputs() -> None:
+    events = load_sample_match_events()
+
+    assert len(events) > 1
+    assert all(isinstance(event, EventInput) for event in events)
+
+
+def test_match_timestamps_are_timezone_aware() -> None:
+    for event in load_sample_match_events():
+        assert event.occurred_at.tzinfo is not None
+        assert event.occurred_at.utcoffset() is not None
+        if event.due_at is not None:
+            assert event.due_at.utcoffset() is not None
+
+
+def test_match_external_ids_are_unique_per_source() -> None:
+    keys = [
+        (event.source, event.external_id)
+        for event in load_sample_match_events()
+        if event.external_id is not None
+    ]
+
+    assert len(keys) == len(set(keys))
+
+
+def test_match_fixtures_cover_the_match_operations_sources() -> None:
+    sources = {event.source for event in load_sample_match_events()}
+
+    assert {"rostering", "tasks", "integrations", "quality", "facilities"} <= sources
+
+
+def test_match_fixtures_exercise_the_risk_rules() -> None:
+    events = load_sample_match_events()
+
+    assert any(event.status == "overdue" for event in events)
+    assert any(event.status == "blocked" for event in events)
+
+    broadcast_failures = [
+        event
+        for event in events
+        if event.event_type == "integration.failed" and event.entity_id == "broadcast-feed"
+    ]
+    assert len(broadcast_failures) >= 3
+
+
+def test_match_fixtures_are_distinct_from_the_general_set() -> None:
+    general_ids = {event.external_id for event in load_sample_events()}
+    match_ids = {event.external_id for event in load_sample_match_events()}
+
+    assert general_ids.isdisjoint(match_ids)
+
+
+def test_match_fixtures_ingest_through_the_batch_endpoint(client: TestClient) -> None:
+    events = load_sample_match_events()
 
     response = client.post(
         "/events/batch",
