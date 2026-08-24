@@ -95,9 +95,20 @@ def load_sample_match_stored_events() -> list[Event]:
     return [_to_stored_event(payload) for payload in load_sample_match_events()]
 
 
+# Imported after the loaders it depends on are defined, so the package can
+# re-export the worked brief example without a circular import.
+from opsbrief.samples.match_brief import (  # noqa: E402
+    SAMPLE_MATCH_BRIEF_AT,
+    SAMPLE_MATCH_BRIEF_SUMMARY,
+    build_sample_match_brief,
+)
+
 __all__ = [
     "SAMPLE_EVENTS_FILENAME",
+    "SAMPLE_MATCH_BRIEF_AT",
+    "SAMPLE_MATCH_BRIEF_SUMMARY",
     "SAMPLE_MATCH_EVENTS_FILENAME",
+    "build_sample_match_brief",
     "load_sample_events",
     "load_sample_match_events",
     "load_sample_match_stored_events",
