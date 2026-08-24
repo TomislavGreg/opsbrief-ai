@@ -24,7 +24,7 @@ policy.
 import json
 from importlib.resources import files
 
-from opsbrief.events import EventInput
+from opsbrief.events import Event, EventInput
 
 #: Name of the packaged JSON file holding the general venue sample events.
 SAMPLE_EVENTS_FILENAME = "events.json"
@@ -63,9 +63,42 @@ def load_sample_match_events() -> list[EventInput]:
     return _load_events(SAMPLE_MATCH_EVENTS_FILENAME)
 
 
+def _to_stored_event(payload: EventInput) -> Event:
+    """Turn a sample submission into a stored event with a stable identifier.
+
+    A brief, risk set or timeline traces back to the stored ``id`` of each event,
+    so an example is only reproducible if those ids are stable. The fixtures carry
+    an ``external_id`` per event, so using it as the stored ``id`` makes the same
+    fixture always yield the same source event ids, without a store assigning a
+    random one. ``received_at`` is pinned to the occurrence instant for the same
+    reason. A fixture event with no ``external_id`` cannot be given a stable id, so
+    it is refused rather than silently given a random one.
+    """
+    if payload.external_id is None:
+        raise ValueError(
+            f"sample event {payload.subject!r} has no external_id to use as a stable id"
+        )
+    return Event.from_input(payload, received_at=payload.occurred_at).model_copy(
+        update={"id": payload.external_id}
+    )
+
+
+def load_sample_match_stored_events() -> list[Event]:
+    """Return the match-day fixture as stored events with stable identifiers.
+
+    The events are the same ones :func:`load_sample_match_events` validates, turned
+    into stored :class:`~opsbrief.events.Event` records ready to feed the risk
+    rules, a brief context or an incident timeline. Each event's ``external_id``
+    becomes its stored ``id``, so the same fixture always resolves to the same
+    source event ids and a demo built on it is reproducible.
+    """
+    return [_to_stored_event(payload) for payload in load_sample_match_events()]
+
+
 __all__ = [
     "SAMPLE_EVENTS_FILENAME",
     "SAMPLE_MATCH_EVENTS_FILENAME",
     "load_sample_events",
     "load_sample_match_events",
+    "load_sample_match_stored_events",
 ]
