@@ -4,8 +4,12 @@ from datetime import UTC
 
 from fastapi.testclient import TestClient
 
-from opsbrief.events import EventInput
-from opsbrief.samples import load_sample_events, load_sample_match_events
+from opsbrief.events import Event, EventInput
+from opsbrief.samples import (
+    load_sample_events,
+    load_sample_match_events,
+    load_sample_match_stored_events,
+)
 
 
 def test_load_returns_validated_event_inputs() -> None:
@@ -62,6 +66,32 @@ def test_fixtures_ingest_through_the_batch_endpoint(client: TestClient) -> None:
     assert body["count"] == len(events)
     assert len(body["events"]) == len(events)
     assert all(stored["id"] for stored in body["events"])
+
+
+def test_match_stored_events_are_stored_event_records() -> None:
+    stored = load_sample_match_stored_events()
+    inputs = load_sample_match_events()
+
+    assert len(stored) == len(inputs)
+    assert all(isinstance(event, Event) for event in stored)
+
+
+def test_match_stored_event_ids_come_from_the_external_ids() -> None:
+    stored = load_sample_match_stored_events()
+
+    for event, source in zip(stored, load_sample_match_events(), strict=True):
+        assert event.id == source.external_id
+        assert event.received_at == event.occurred_at
+
+
+def test_match_stored_events_have_unique_stable_ids() -> None:
+    first = load_sample_match_stored_events()
+    second = load_sample_match_stored_events()
+
+    ids = [event.id for event in first]
+    assert len(ids) == len(set(ids))
+    # Reproducible: the same fixture always resolves to the same ids.
+    assert ids == [event.id for event in second]
 
 
 def test_match_load_returns_validated_event_inputs() -> None:
