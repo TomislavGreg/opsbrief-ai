@@ -54,6 +54,12 @@ produced it.
   stewarding, an overdue pitch inspection, a blocked scoreboard task, a broadcast
   feed failing repeatedly, a rejected goal-line technology check and a
   crowd-density alert) for demos, documentation and Game Center readiness work.
+- A worked match-operations daily brief example: `build_sample_match_brief` runs
+  the whole risk-to-brief pipeline over the match-day fixture at a fixed match-day
+  instant, surfacing the overdue pitch inspection, the blocked scoreboard
+  calibration and the repeatedly failing broadcast feed, and phrasing them with a
+  scripted fake provider, so the pipeline can be shown over realistic
+  match-operations material without a database, a running server or a real model.
 - A deterministic risk contract and rule interface: a `Risk` that names the rule
   and the source event IDs behind it, a `RiskRule` protocol, and a `detect_risks`
   detector that runs a set of rules over stored events.
@@ -1037,6 +1043,30 @@ from opsbrief.samples import load_sample_match_events
 events = load_sample_match_events()  # Validated EventInput models
 ```
 
+The match day doubles as a worked example of the whole pipeline.
+`load_sample_match_stored_events` turns the fixture into stored events ready for
+the risk rules, a brief context or an incident timeline: each event's
+`external_id` becomes its stored `id`, so the same fixture always resolves to the
+same source event ids and anything built on it is reproducible.
+`build_sample_match_brief` uses that to run the full risk-to-brief pipeline at a
+fixed match-day instant, phrased by a scripted fake provider, so a complete brief
+can be shown without a database, a running server or a real model:
+
+```python
+from opsbrief.samples import build_sample_match_brief
+
+brief = build_sample_match_brief()
+brief.summary  # an illustrative duty-manager summary, phrased by the fake provider
+brief.risks  # the overdue, blocked and repeated-failure risks the rules found
+brief.source_event_ids  # every fixture event the brief traces back to
+brief.confidence  # high: every cited event resolves and the picture is phrased
+```
+
+Only the `summary` is illustrative phrasing; the risks, the source event ids and
+the confidence underneath it are the real deterministic picture the service
+decides. Pass your own provider to `build_sample_match_brief` to phrase the same
+picture differently.
+
 The fixtures are read from `src/opsbrief/samples/events.json` and
 `src/opsbrief/samples/match_events.json` and validated through the same contract
 producers submit against, so a fixture that drifts out of line with the schema
@@ -1670,8 +1700,8 @@ started only once the API and core services are stable.
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
 | AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
-| AI-064 | Add match-operations daily brief example | Game Center readiness | In Progress |
-| AI-065 | Add QC incident example | Game Center readiness | Backlog |
+| AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
+| AI-065 | Add QC incident example | Game Center readiness | Ready |
 | AI-066 | Add deployment documentation | Game Center readiness | Backlog |
 | AI-070 | Add simple server-rendered dashboard | Demo interface | Backlog |
 | AI-071 | Display recent events | Demo interface | Backlog |
@@ -1698,11 +1728,14 @@ AI-056 (run dependency scanning in CI) is Blocked: it needs a change under
 applies it directly, as noted below. `pip-audit` can be run locally in the
 meantime, as the Security section describes.
 
-Phase 6 (Game Center readiness) is under way: the package now ships a
-sports-operations match-day fixture alongside the general venue set, shaped so
-the risk rules recognise it. The next steps build on it, such as a
-match-operations daily brief example (AI-064). When a ticket's dependencies are
-complete, promote it to Ready so the next change has a clear starting point.
+Phase 6 (Game Center readiness) is under way: the package ships a
+sports-operations match-day fixture alongside the general venue set, and now a
+worked match-operations daily brief example (`build_sample_match_brief`) that
+runs the whole risk-to-brief pipeline over it. The next step builds on the same
+material: a quality-control incident example (AI-065), now Ready, tracks a
+rejected goal-line technology check through the incident lifecycle. When a
+ticket's dependencies are complete, promote it to Ready so the next change has a
+clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1713,6 +1746,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-23 - Added a sports-operations match-day sample fixture alongside the general venue set: `load_sample_match_events` reads and validates a synthetic football match day (short stewarding, an unfilled medic post, an overdue pitch inspection, a blocked scoreboard task, a broadcast feed failing repeatedly and a crowd-density alert), shaped so the deterministic risk rules recognise it, giving Game Center readiness work realistic match-operations material.
 - 2026-08-23 - Added a security policy and dependency scanning: `SECURITY.md` records how to report a vulnerability, which versions are supported and the design choices that keep the service safe, and `pip-audit` ships in the `dev` extra so the installed dependencies can be scanned for known advisories with one command. Automating the scan in CI is tracked separately as it needs a workflow change a maintainer applies.
 - 2026-08-22 - Added structured generation audit records: a daily brief or an incident summary can be projected into a compact, uniform `GenerationAudit` naming what the output was produced from (its source and missing event ids) and by (its model and prompt and output versions), alongside the confidence and warning codes it reported, derived from the output and holding no model involvement of its own.
@@ -1726,7 +1760,6 @@ it is not picked up and left half-finished.
 - 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
 - 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
 - 2026-08-13 — Added incident timelines: `build_incident_timeline` lays an incident's cited events out oldest occurred first, reports the span they ran over and any cited ID that no stored event answers to, without a model.
-- 2026-08-12 — Made daily-brief generation degrade gracefully when the AI provider fails: an outage now returns the deterministic picture with an empty summary and a note, so the `/brief` endpoint answers rather than erroring.
 
 ## Future Game Center Integration
 
