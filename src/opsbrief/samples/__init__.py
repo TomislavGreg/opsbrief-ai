@@ -95,12 +95,24 @@ def load_sample_match_stored_events() -> list[Event]:
     return [_to_stored_event(payload) for payload in load_sample_match_events()]
 
 
-# Imported after the loaders it depends on are defined, so the package can
-# re-export the worked brief example without a circular import.
+# Imported after the loaders they depend on are defined, so the package can
+# re-export the worked examples without a circular import.
 from opsbrief.samples.match_brief import (  # noqa: E402
     SAMPLE_MATCH_BRIEF_AT,
     SAMPLE_MATCH_BRIEF_SUMMARY,
     build_sample_match_brief,
+)
+from opsbrief.samples.qc_incident import (  # noqa: E402
+    SAMPLE_QC_EVENT_ID,
+    SAMPLE_QC_INCIDENT_DECLARED_AT,
+    SAMPLE_QC_INCIDENT_ID,
+    SAMPLE_QC_INCIDENT_INVESTIGATING_AT,
+    SAMPLE_QC_INCIDENT_MONITORING_AT,
+    SAMPLE_QC_INCIDENT_RESOLVED_AT,
+    SAMPLE_QC_INCIDENT_SUMMARY,
+    SAMPLE_QC_RESOLUTION_NOTE,
+    build_sample_qc_incident,
+    build_sample_qc_incident_summary,
 )
 
 __all__ = [
@@ -108,7 +120,17 @@ __all__ = [
     "SAMPLE_MATCH_BRIEF_AT",
     "SAMPLE_MATCH_BRIEF_SUMMARY",
     "SAMPLE_MATCH_EVENTS_FILENAME",
+    "SAMPLE_QC_EVENT_ID",
+    "SAMPLE_QC_INCIDENT_DECLARED_AT",
+    "SAMPLE_QC_INCIDENT_ID",
+    "SAMPLE_QC_INCIDENT_INVESTIGATING_AT",
+    "SAMPLE_QC_INCIDENT_MONITORING_AT",
+    "SAMPLE_QC_INCIDENT_RESOLVED_AT",
+    "SAMPLE_QC_INCIDENT_SUMMARY",
+    "SAMPLE_QC_RESOLUTION_NOTE",
     "build_sample_match_brief",
+    "build_sample_qc_incident",
+    "build_sample_qc_incident_summary",
     "load_sample_events",
     "load_sample_match_events",
     "load_sample_match_stored_events",
