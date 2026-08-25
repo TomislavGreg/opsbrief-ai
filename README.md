@@ -1733,8 +1733,8 @@ started only once the API and core services are stable.
 | AI-054 | Add structured generation audit records | Safety and explainability | Done |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Done |
 | AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
-| AI-060 | Add authenticated webhook ingestion design | Game Center readiness | In Progress |
-| AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
+| AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Done |
+| AI-061 | Add generic webhook ingestion | Game Center readiness | Ready |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
 | AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
@@ -1770,12 +1770,13 @@ sports-operations match-day fixture alongside the general venue set, a worked
 match-operations daily brief example (`build_sample_match_brief`) that runs the
 whole risk-to-brief pipeline over it, and now a worked quality-control incident
 example (`build_sample_qc_incident`) that tracks the rejected goal-line
-technology check through the incident lifecycle and summarises it. The next step
-moves from examples to ingestion: an authenticated webhook design (AI-060)
-records how the operations platform will post events, so generic webhook
-ingestion (AI-061) has a clear contract to build against. When a ticket's
-dependencies are complete, promote it to Ready so the next change has a clear
-starting point.
+technology check through the incident lifecycle and summarises it. The design for
+authenticated webhook ingestion is now recorded in
+[`docs/webhook-ingestion.md`](docs/webhook-ingestion.md): the operations platform
+will post events to a signed webhook that reuses the existing event contract, so
+generic webhook ingestion (AI-061), now Ready, has a clear contract to build
+against. When a ticket's dependencies are complete, promote it to Ready so the
+next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1786,6 +1787,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
 - 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-23 - Added a sports-operations match-day sample fixture alongside the general venue set: `load_sample_match_events` reads and validates a synthetic football match day (short stewarding, an unfilled medic post, an overdue pitch inspection, a blocked scoreboard task, a broadcast feed failing repeatedly and a crowd-density alert), shaped so the deterministic risk rules recognise it, giving Game Center readiness work realistic match-operations material.
@@ -1799,7 +1801,6 @@ it is not picked up and left half-finished.
 - 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
 - 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
 - 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
-- 2026-08-14 - Added AI incident summaries: `generate_incident_summary` turns an incident and its timeline into an `IncidentSummary` phrased by the provider and constrained as untrusted output, with status, severity, span, cited events and missing-event notes carried over deterministically and a provider outage degrading to the deterministic picture.
 
 ## Future Game Center Integration
 
@@ -1815,7 +1816,10 @@ the API. There is no shared database and no coupling to any platform-specific
 schema: the event contract is generic, and sports-operations specifics arrive
 as event types and metadata rather than as bespoke code paths.
 
-That work is Phase 6. Nothing in the earlier phases assumes it.
+That work is Phase 6. The webhook's design, how a delivery is authenticated and
+why it reuses the existing event contract, is written up in
+[`docs/webhook-ingestion.md`](docs/webhook-ingestion.md). Nothing in the earlier
+phases assumes it.
 
 ## Contributing
 
