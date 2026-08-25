@@ -1701,7 +1701,7 @@ started only once the API and core services are stable.
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
 | AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
-| AI-065 | Add QC incident example | Game Center readiness | Ready |
+| AI-065 | Add QC incident example | Game Center readiness | In Progress |
 | AI-066 | Add deployment documentation | Game Center readiness | Backlog |
 | AI-070 | Add simple server-rendered dashboard | Demo interface | Backlog |
 | AI-071 | Display recent events | Demo interface | Backlog |
