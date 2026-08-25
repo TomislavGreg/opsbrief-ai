@@ -1733,7 +1733,7 @@ started only once the API and core services are stable.
 | AI-054 | Add structured generation audit records | Safety and explainability | Done |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Done |
 | AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
-| AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Backlog |
+| AI-060 | Add authenticated webhook ingestion design | Game Center readiness | In Progress |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Backlog |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
 | AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
