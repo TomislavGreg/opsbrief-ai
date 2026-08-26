@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from opsbrief import __version__
-from opsbrief.api import brief, events, health, incidents, risks
+from opsbrief.api import brief, events, health, incidents, risks, webhooks
 from opsbrief.config import get_settings
 from opsbrief.storage import EventStore, IncidentStore
 
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(risks.router)
     app.include_router(brief.router)
     app.include_router(incidents.router)
+    app.include_router(webhooks.router)
     return app
 
 
