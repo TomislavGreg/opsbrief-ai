@@ -1827,10 +1827,10 @@ started only once the API and core services are stable.
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Done |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Done |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
-| AI-063 | Add Game Center integration contract | Game Center readiness | In Progress |
+| AI-063 | Add Game Center integration contract | Game Center readiness | Done |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
 | AI-065 | Add QC incident example | Game Center readiness | Done |
-| AI-066 | Add deployment documentation | Game Center readiness | Backlog |
+| AI-066 | Add deployment documentation | Game Center readiness | Ready |
 | AI-070 | Add simple server-rendered dashboard | Demo interface | Backlog |
 | AI-071 | Display recent events | Demo interface | Backlog |
 | AI-072 | Display active risks | Demo interface | Backlog |
@@ -1865,11 +1865,13 @@ technology check through the incident lifecycle and summarises it. The
 authenticated webhook is now implemented: `POST /webhooks/events` authenticates a
 signed delivery, following [`docs/webhook-ingestion.md`](docs/webhook-ingestion.md),
 and stores it through the existing batch path, so the operations platform has a
-real write path to build against. With the webhook in place, the Game Center
-integration contract (AI-063), now Ready, is the next step: a single document
-describing the one-directional contract the platform integrates against. When a
-ticket's dependencies are complete, promote it to Ready so the next change has a
-clear starting point.
+real write path to build against. That write path, the read endpoints, the event
+modelling conventions the risk rules read, and the versioning and security
+boundary are now drawn together in
+[`docs/integration-contract.md`](docs/integration-contract.md), the single
+contract the platform integrates against (AI-063). Deployment documentation
+(AI-066), now Ready, is the next step. When a ticket's dependencies are complete,
+promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1880,6 +1882,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
 - 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
 - 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
 - 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
@@ -1893,7 +1896,6 @@ it is not picked up and left half-finished.
 - 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 - 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
 - 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
-- 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
 
 ## Future Game Center Integration
 
@@ -1909,8 +1911,11 @@ the API. There is no shared database and no coupling to any platform-specific
 schema: the event contract is generic, and sports-operations specifics arrive
 as event types and metadata rather than as bespoke code paths.
 
-That work is Phase 6. The webhook's design, how a delivery is authenticated and
-why it reuses the existing event contract, is written up in
+That work is Phase 6. The whole contract the platform integrates against, the
+authenticated write path, the read endpoints, the event modelling conventions and
+the versioning and security boundary, is written up in
+[`docs/integration-contract.md`](docs/integration-contract.md), with the webhook's
+authentication design detailed in
 [`docs/webhook-ingestion.md`](docs/webhook-ingestion.md). Nothing in the earlier
 phases assumes it.
 
