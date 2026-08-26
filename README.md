@@ -45,6 +45,14 @@ produced it.
 - A `POST /events/batch` endpoint that validates a bounded batch of events and
   stores them together, all-or-nothing, recognising a resubmission carrying an
   `external_id` already seen from the same source rather than storing it twice.
+- A `POST /webhooks/events` endpoint: an authenticated front door over batch
+  ingestion for a remote operations platform. It reuses the existing batch event
+  contract, verifies an HMAC-SHA256 signature over the raw request body (keyed by
+  `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against
+  replay, then stores the events through the same validated, redacted and
+  deduplicated path a direct submission uses. It is disabled, answering 404, unless
+  a secret is configured, so an unconfigured deployment never takes an
+  unauthenticated write.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
   source, type, severity or status and paginated with `limit` and `offset`.
 - A `GET /events/{event_id}` endpoint that returns a single stored event, or
@@ -473,6 +481,31 @@ scoped to the `source`, so two producers may use the same `external_id` without
 colliding. A `POST /events/batch` request recognises resubmissions the same way,
 described above.
 
+Deliver events from a remote platform through the signed webhook. The body is the
+same batch shape `POST /events/batch` accepts, and each delivery carries a
+timestamp and an HMAC-SHA256 signature over `"<timestamp>." + raw_body`, keyed by
+the shared `OPSBRIEF_WEBHOOK_SECRET`:
+
+```bash
+secret="$OPSBRIEF_WEBHOOK_SECRET"
+body='{"events":[{"source":"rostering","event_type":"shift.unfilled","subject":"Steward shift for fixture 4821 is one short","occurred_at":"2026-07-29T09:30:00Z","external_id":"roster-9931"}]}'
+timestamp=$(date +%s)
+signature="sha256=$(printf '%s.%s' "$timestamp" "$body" | openssl dgst -sha256 -hmac "$secret" | awk '{print $2}')"
+
+curl -X POST http://127.0.0.1:8000/webhooks/events \
+  -H 'Content-Type: application/json' \
+  -H "X-OpsBrief-Timestamp: $timestamp" \
+  -H "X-OpsBrief-Signature: $signature" \
+  -d "$body"
+```
+
+On success the service answers `202 Accepted` with the same `count` and stored
+events `POST /events/batch` returns. A missing, malformed, expired or mismatched
+signature is `401`, a body over the size bound is `413`, and a body that fails the
+event contract is `422` with nothing stored. When `OPSBRIEF_WEBHOOK_SECRET` is
+unset the route is disabled and answers `404`. See
+[Webhook Ingestion](#webhook-ingestion) for the authentication scheme.
+
 List the current operational risks, most urgent first:
 
 ```bash
@@ -815,6 +848,64 @@ with IncidentStore.open("sqlite:///./opsbrief.db") as store:
     store.get(incident.id)  # the stored incident, or None
     store.list_incidents(status=IncidentStatus.OPEN)  # most recently opened first
 ```
+
+## Webhook Ingestion
+
+A remote operations platform (Game Center) delivers events to OpsBrief AI over an
+authenticated webhook, `POST /webhooks/events`. It is a thin front door over the
+batch ingestion the service already has: the body is exactly the `events` array
+`POST /events/batch` accepts, so a delivery is validated, redacted and
+deduplicated by the same code path a direct submission is, and a single-event
+delivery is a batch of one. The full design and its rationale are in
+[`docs/webhook-ingestion.md`](docs/webhook-ingestion.md); this section describes
+what the implemented route does.
+
+Each delivery is authenticated with an HMAC-SHA256 signature over the raw request
+body, keyed by a shared secret. The sender signs `"<timestamp>." + raw_body` and
+sends the timestamp and signature in two headers:
+
+```
+X-OpsBrief-Timestamp: 1757650800
+X-OpsBrief-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>." + raw body>
+```
+
+The server verifies a delivery over the raw bytes, before parsing, in a fixed
+order: both headers must be present; the timestamp must be an integer inside the
+allowed skew window (`OPSBRIEF_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS`, default 300s),
+checked first so an old capture is refused up front; and the signature, recomputed
+with the configured secret, must match in constant time (`hmac.compare_digest`).
+Signing the timestamp alongside the body is what makes replay protection
+meaningful: a captured request cannot be re-timestamped. Combined with the
+existing `(source, external_id)` deduplication, a replay inside the window still
+does not double-store.
+
+```python
+from opsbrief.webhooks import compute_signature, verify_webhook_signature
+
+signature = compute_signature(secret, timestamp, raw_body)  # what the sender sends
+verify_webhook_signature(  # what the server runs
+    secret=secret,
+    body=raw_body,
+    timestamp_header=timestamp,
+    signature_header=signature,
+    now=int(time.time()),
+)  # returns None when authentic, raises WebhookAuthError otherwise
+```
+
+The shared secret is read from `OPSBRIEF_WEBHOOK_SECRET` and never lives in the
+repository. When it is unset the route is disabled and answers `404`, so an
+unconfigured deployment never accepts an unauthenticated write; when it is set it
+must be at least 16 characters, enforced when the settings are read. The body is
+size-bounded before it is verified, so an oversized payload is refused with `413`
+rather than read fully and parsed. Input stays untrusted: the signature proves who
+sent the body, not that it is well-formed, so every event is still validated by
+the Pydantic contract, redacted for sensitive metadata, and constrained exactly as
+a direct submission is. On success the endpoint answers `202 Accepted` with the
+same `count` and stored events `POST /events/batch` returns; a signature failure
+is `401`, an oversized body `413`, and a body that fails the event contract `422`
+with nothing stored. Per-producer secrets, key rotation and multiple active
+secrets are out of scope for now; the `sha256=` prefix leaves room for a future
+scheme without breaking existing senders.
 
 ## Redaction
 
@@ -1734,9 +1825,9 @@ started only once the API and core services are stable.
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Done |
 | AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Done |
-| AI-061 | Add generic webhook ingestion | Game Center readiness | In Progress |
+| AI-061 | Add generic webhook ingestion | Game Center readiness | Done |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
-| AI-063 | Add Game Center integration contract | Game Center readiness | Backlog |
+| AI-063 | Add Game Center integration contract | Game Center readiness | Ready |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
 | AI-065 | Add QC incident example | Game Center readiness | Done |
 | AI-066 | Add deployment documentation | Game Center readiness | Backlog |
@@ -1770,13 +1861,15 @@ sports-operations match-day fixture alongside the general venue set, a worked
 match-operations daily brief example (`build_sample_match_brief`) that runs the
 whole risk-to-brief pipeline over it, and now a worked quality-control incident
 example (`build_sample_qc_incident`) that tracks the rejected goal-line
-technology check through the incident lifecycle and summarises it. The design for
-authenticated webhook ingestion is now recorded in
-[`docs/webhook-ingestion.md`](docs/webhook-ingestion.md): the operations platform
-will post events to a signed webhook that reuses the existing event contract, so
-generic webhook ingestion (AI-061), now Ready, has a clear contract to build
-against. When a ticket's dependencies are complete, promote it to Ready so the
-next change has a clear starting point.
+technology check through the incident lifecycle and summarises it. The
+authenticated webhook is now implemented: `POST /webhooks/events` authenticates a
+signed delivery, following [`docs/webhook-ingestion.md`](docs/webhook-ingestion.md),
+and stores it through the existing batch path, so the operations platform has a
+real write path to build against. With the webhook in place, the Game Center
+integration contract (AI-063), now Ready, is the next step: a single document
+describing the one-directional contract the platform integrates against. When a
+ticket's dependencies are complete, promote it to Ready so the next change has a
+clear starting point.
 
 ### Maintaining the CI workflow
 
@@ -1787,6 +1880,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
 - 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
 - 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
@@ -1800,7 +1894,6 @@ it is not picked up and left half-finished.
 - 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
 - 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
 - 2026-08-16 - Added incident declaration from events: `declare_incident_from_risk` opens an incident from a risk, and `declare_incidents_from_events` runs the canonical risk rules over the stored events and opens one incident per recognised risk, most urgent first, without a model.
-- 2026-08-15 - Added incident persistence: `IncidentStore` keeps declared incidents in SQLite, `add` records a declaration and `save` persists a later change, and `get`, `list_incidents` and `count` read them back, with the ordered source event IDs preserved as JSON.
 
 ## Future Game Center Integration
 
