@@ -2,10 +2,12 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from opsbrief.exclusion import normalise_excluded_fields
 from opsbrief.redaction import DEFAULT_SENSITIVE_KEYS
+from opsbrief.webhooks import DEFAULT_TIMESTAMP_TOLERANCE_SECONDS, MIN_SECRET_LENGTH
 
 
 class Settings(BaseSettings):
@@ -29,6 +31,35 @@ class Settings(BaseSettings):
     ai_provider: str = "fake"
     redact_metadata_keys: str = ""
     ai_context_excluded_fields: str = ""
+    webhook_secret: str = ""
+    webhook_timestamp_tolerance_seconds: int = DEFAULT_TIMESTAMP_TOLERANCE_SECONDS
+
+    @model_validator(mode="after")
+    def _check_webhook_settings(self) -> "Settings":
+        """Refuse a webhook configuration that would silently weaken the path.
+
+        The webhook is disabled when ``OPSBRIEF_WEBHOOK_SECRET`` is unset, so an
+        empty secret is allowed and means "no webhook". A secret that is set but
+        shorter than :data:`~opsbrief.webhooks.MIN_SECRET_LENGTH`, or a
+        non-positive skew tolerance, is a misconfiguration that fails loudly here
+        rather than accepting weakly authenticated writes later.
+        """
+        if self.webhook_secret and len(self.webhook_secret) < MIN_SECRET_LENGTH:
+            raise ValueError(
+                f"OPSBRIEF_WEBHOOK_SECRET must be at least {MIN_SECRET_LENGTH} characters"
+            )
+        if self.webhook_timestamp_tolerance_seconds <= 0:
+            raise ValueError("OPSBRIEF_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS must be positive")
+        return self
+
+    def webhook_enabled(self) -> bool:
+        """Return whether the webhook front door is configured and enabled.
+
+        A webhook write path exists only when a secret is set; without one the
+        route accepts nothing, so an unconfigured deployment never takes an
+        unauthenticated write.
+        """
+        return bool(self.webhook_secret)
 
     def sensitive_metadata_keys(self) -> frozenset[str]:
         """Return the metadata key terms redaction masks values for.

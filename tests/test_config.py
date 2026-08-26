@@ -43,3 +43,29 @@ def test_an_unknown_excluded_field_is_refused() -> None:
 
     with pytest.raises(ValueError, match="unknown AI context field 'nope'"):
         settings.excluded_ai_context_fields()
+
+
+def test_the_webhook_is_disabled_without_a_secret() -> None:
+    settings = Settings(webhook_secret="")
+
+    assert settings.webhook_enabled() is False
+
+
+def test_a_configured_secret_enables_the_webhook() -> None:
+    settings = Settings(webhook_secret="a-long-enough-webhook-secret")
+
+    assert settings.webhook_enabled() is True
+
+
+def test_a_short_secret_is_refused() -> None:
+    with pytest.raises(ValueError, match="at least 16 characters"):
+        Settings(webhook_secret="too-short")
+
+
+def test_the_timestamp_tolerance_defaults_to_five_minutes() -> None:
+    assert Settings().webhook_timestamp_tolerance_seconds == 300
+
+
+def test_a_non_positive_timestamp_tolerance_is_refused() -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        Settings(webhook_timestamp_tolerance_seconds=0)
