@@ -1827,7 +1827,7 @@ started only once the API and core services are stable.
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Done |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Done |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
-| AI-063 | Add Game Center integration contract | Game Center readiness | Ready |
+| AI-063 | Add Game Center integration contract | Game Center readiness | In Progress |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
 | AI-065 | Add QC incident example | Game Center readiness | Done |
 | AI-066 | Add deployment documentation | Game Center readiness | Backlog |
