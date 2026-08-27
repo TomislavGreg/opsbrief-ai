@@ -1840,7 +1840,7 @@ started only once the API and core services are stable.
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
 | AI-065 | Add QC incident example | Game Center readiness | Done |
 | AI-066 | Add deployment documentation | Game Center readiness | Done |
-| AI-070 | Add simple server-rendered dashboard | Demo interface | Ready |
+| AI-070 | Add simple server-rendered dashboard | Demo interface | In Progress |
 | AI-071 | Display recent events | Demo interface | Backlog |
 | AI-072 | Display active risks | Demo interface | Backlog |
 | AI-073 | Display the latest daily brief | Demo interface | Backlog |
