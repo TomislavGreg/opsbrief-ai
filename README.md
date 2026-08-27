@@ -214,6 +214,13 @@ produced it.
   vulnerability, which versions are supported and the design choices that keep the
   service safe, and `pip-audit` ships in the `dev` extra so the installed
   dependencies can be scanned for known advisories with one command.
+- A server-rendered dashboard at `GET /dashboard`: a small HTML page, built from the
+  standard library with no template engine or client-side framework, showing the
+  running service's identity (name, environment, version) and links into the read
+  endpoints (the daily brief, risks, events, incidents, health and the API docs). It
+  is the shell of the demo interface: later views render some of those panels inline.
+  Every dynamic value is escaped as it is rendered, and the page reads no store, so
+  it renders the same on an empty database.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -235,6 +242,7 @@ src/opsbrief/
   samples/      Synthetic operational-event fixtures and their loader
   services/     Logic behind the routers
   storage/      SQLite connection handling and the event and incident stores
+  web/          Server-rendered dashboard view model and HTML rendering
   cli.py        Command-line daily-brief generation
   config.py     Environment-backed settings
   main.py       Application factory and module-level `app`
@@ -283,7 +291,8 @@ uvicorn opsbrief.main:app --reload
 ```
 
 The API is then on http://127.0.0.1:8000, with interactive docs at
-http://127.0.0.1:8000/docs.
+http://127.0.0.1:8000/docs and a server-rendered dashboard at
+http://127.0.0.1:8000/dashboard.
 
 Requires Python 3.12 or newer.
 
@@ -1733,6 +1742,32 @@ or resolves. The transition and note rules stay in the incident model, not the
 router. The application opens the incident store alongside the event store when
 it starts. Examples are shown under [API Examples](#api-examples).
 
+## Dashboard
+
+The JSON API is the product; the dashboard is a face for a person over it. It is a
+server-rendered HTML page at `GET /dashboard`, deliberately small: built from the
+standard library with no template engine and no client-side framework, so it adds
+no new dependency and no build step.
+
+```bash
+curl http://127.0.0.1:8000/dashboard
+```
+
+The shell shows the running service's identity (name, environment and version, the
+same the `/health` endpoint reports) and links into the read endpoints a duty
+manager reaches for: the daily brief, the current risks, the stored events, tracked
+incidents, health and the interactive API docs. It is the first step of the demo
+interface: the later views render some of those panels inline in place of the link,
+against the same endpoints.
+
+The page is assembled in three thin layers, mirroring the rest of the service. A
+`DashboardView` view model carries what the page shows; a service builds it from
+the settings, reading no store, so the shell renders the same whether or not any
+events have been recorded; and a render module turns the view into a self-contained
+HTML document. Every dynamic value (the service name, the environment label) is
+escaped as it is placed, so an operator-supplied setting cannot inject markup, and
+the rendering is a pure function of the view.
+
 ## Development Commands
 
 ```bash
@@ -1840,8 +1875,8 @@ started only once the API and core services are stable.
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
 | AI-065 | Add QC incident example | Game Center readiness | Done |
 | AI-066 | Add deployment documentation | Game Center readiness | Done |
-| AI-070 | Add simple server-rendered dashboard | Demo interface | In Progress |
-| AI-071 | Display recent events | Demo interface | Backlog |
+| AI-070 | Add simple server-rendered dashboard | Demo interface | Done |
+| AI-071 | Display recent events | Demo interface | Ready |
 | AI-072 | Display active risks | Demo interface | Backlog |
 | AI-073 | Display the latest daily brief | Demo interface | Backlog |
 | AI-074 | Display incidents and timelines | Demo interface | Backlog |
@@ -1882,10 +1917,13 @@ contract the platform integrates against (AI-063), and
 [`docs/deployment.md`](docs/deployment.md) now records how to run the service in
 a real environment (AI-066).
 
-Phase 7 (Demo interface) is next: a server-rendered dashboard over the existing
-API, started now that the API and core services are stable. AI-070 (the dashboard
-shell) is Ready as its first step. When a ticket's dependencies are complete,
-promote it to Ready so the next change has a clear starting point.
+Phase 7 (Demo interface) is under way: a server-rendered dashboard over the
+existing API, started now that the API and core services are stable. The dashboard
+shell is in place at `GET /dashboard` (AI-070), a small standard-library HTML page
+showing the service identity and links into the read endpoints. AI-071 (display
+recent events), the first inline panel, is Ready as the next step. When a ticket's
+dependencies are complete, promote it to Ready so the next change has a clear
+starting point.
 
 ### Maintaining the CI workflow
 
@@ -1896,6 +1934,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-27 - Added a server-rendered dashboard shell at `GET /dashboard`: a small standard-library HTML page (no template engine, no client-side framework) showing the running service's identity and links into the read endpoints (the daily brief, risks, events, incidents, health and the API docs). It is assembled in three thin layers (a `DashboardView` view model, a service that builds it from the settings without reading any store, and a render module that escapes every dynamic value), and is the first step of Phase 7's demo interface.
 - 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
 - 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
 - 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
@@ -1909,7 +1948,6 @@ it is not picked up and left half-finished.
 - 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
 - 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
 - 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
-- 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
 
 ## Future Game Center Integration
 
