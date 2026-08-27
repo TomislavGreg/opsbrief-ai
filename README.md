@@ -310,6 +310,15 @@ docker compose logs -f api     # Follow logs
 docker compose down            # Stop and remove
 ```
 
+### Deployment
+
+For running the service beyond a local checkout, [`docs/deployment.md`](docs/deployment.md)
+covers the container image and Compose, the plain Python install, the full
+`OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume and
+its backups, health checks, running behind a TLS-terminating reverse proxy, and
+upgrades. The service is a single process backed by one SQLite file, so a deployment
+is stateful in exactly one place.
+
 ## API Examples
 
 Check that the service is running:
@@ -1830,8 +1839,8 @@ started only once the API and core services are stable.
 | AI-063 | Add Game Center integration contract | Game Center readiness | Done |
 | AI-064 | Add match-operations daily brief example | Game Center readiness | Done |
 | AI-065 | Add QC incident example | Game Center readiness | Done |
-| AI-066 | Add deployment documentation | Game Center readiness | In Progress |
-| AI-070 | Add simple server-rendered dashboard | Demo interface | Backlog |
+| AI-066 | Add deployment documentation | Game Center readiness | Done |
+| AI-070 | Add simple server-rendered dashboard | Demo interface | Ready |
 | AI-071 | Display recent events | Demo interface | Backlog |
 | AI-072 | Display active risks | Demo interface | Backlog |
 | AI-073 | Display the latest daily brief | Demo interface | Backlog |
@@ -1856,21 +1865,26 @@ AI-056 (run dependency scanning in CI) is Blocked: it needs a change under
 applies it directly, as noted below. `pip-audit` can be run locally in the
 meantime, as the Security section describes.
 
-Phase 6 (Game Center readiness) is under way: the package ships a
+Phase 6 (Game Center readiness) is complete: the package ships a
 sports-operations match-day fixture alongside the general venue set, a worked
 match-operations daily brief example (`build_sample_match_brief`) that runs the
-whole risk-to-brief pipeline over it, and now a worked quality-control incident
+whole risk-to-brief pipeline over it, and a worked quality-control incident
 example (`build_sample_qc_incident`) that tracks the rejected goal-line
 technology check through the incident lifecycle and summarises it. The
-authenticated webhook is now implemented: `POST /webhooks/events` authenticates a
+authenticated webhook is implemented: `POST /webhooks/events` authenticates a
 signed delivery, following [`docs/webhook-ingestion.md`](docs/webhook-ingestion.md),
 and stores it through the existing batch path, so the operations platform has a
 real write path to build against. That write path, the read endpoints, the event
 modelling conventions the risk rules read, and the versioning and security
-boundary are now drawn together in
+boundary are drawn together in
 [`docs/integration-contract.md`](docs/integration-contract.md), the single
-contract the platform integrates against (AI-063). Deployment documentation
-(AI-066), now Ready, is the next step. When a ticket's dependencies are complete,
+contract the platform integrates against (AI-063), and
+[`docs/deployment.md`](docs/deployment.md) now records how to run the service in
+a real environment (AI-066).
+
+Phase 7 (Demo interface) is next: a server-rendered dashboard over the existing
+API, started now that the API and core services are stable. AI-070 (the dashboard
+shell) is Ready as its first step. When a ticket's dependencies are complete,
 promote it to Ready so the next change has a clear starting point.
 
 ### Maintaining the CI workflow
@@ -1882,6 +1896,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
 - 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
 - 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
 - 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
@@ -1895,7 +1910,6 @@ it is not picked up and left half-finished.
 - 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
 - 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 - 2026-08-17 - Added incident resolution notes: an incident can be resolved with an optional operator note over `POST /incidents/{id}/resolution`, kept with the incident (absent while active, cleared on reopening) and carried into its summary, with an older database gaining the new column on open.
-- 2026-08-16 - Added incident API endpoints: `POST /incidents` declares an incident from a posted title, severity and events, `GET /incidents` lists stored incidents filtered by status and paginated, and `GET /incidents/{id}` returns one or 404s, with the incident store opened alongside the event store.
 
 ## Future Game Center Integration
 
