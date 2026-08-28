@@ -10,7 +10,7 @@ always produces the same page.
 
 from html import escape
 
-from opsbrief.web.schema import DashboardLink, DashboardView, RecentEventRow
+from opsbrief.web.schema import DashboardLink, DashboardView, RecentEventRow, RiskRow
 
 _STYLE = """
 :root { color-scheme: light dark; }
@@ -46,6 +46,35 @@ section.panel h2 { font-size: 1.15rem; margin: 0 0 0.5rem; }
   color: #555;
   margin: 0;
 }
+ul.risks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+ul.risks li.risk {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  background: #fff;
+  border: 1px solid #e2e2e2;
+  border-radius: 0.6rem;
+  padding: 0.75rem 1rem;
+}
+.risk-title { margin: 0; font-weight: 600; }
+.risk-meta { margin: 0.2rem 0 0; color: #555; font-size: 0.85rem; }
+.sev {
+  flex: none;
+  display: inline-block;
+  min-width: 4.5rem;
+  text-align: center;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.sev-critical { background: #fee2e2; color: #991b1b; }
+.sev-high { background: #ffedd5; color: #9a3412; }
+.sev-medium { background: #fef9c3; color: #854d0e; }
+.sev-low { background: #e0e7ff; color: #3730a3; }
+.sev-default { background: #e5e7eb; color: #374151; }
 .events {
   width: 100%;
   border-collapse: collapse;
@@ -77,6 +106,67 @@ ul.links a:hover { text-decoration: underline; }
 ul.links p { margin: 0.25rem 0 0; color: #555; font-size: 0.95rem; }
 footer { margin-top: 2rem; color: #777; font-size: 0.85rem; }
 """.strip()
+
+
+#: Severity name to the badge class it is shown with. A severity outside the set
+#: falls back to a neutral badge, so an unexpected value is never placed into the
+#: class attribute unescaped.
+_SEVERITY_CLASSES = {
+    "critical": "sev-critical",
+    "high": "sev-high",
+    "medium": "sev-medium",
+    "low": "sev-low",
+}
+
+
+def _render_risk_row(row: RiskRow) -> str:
+    """Render one active-risk card, escaping every field.
+
+    The severity badge class comes from a fixed lookup, so only a known severity
+    reaches the class attribute; the severity text itself is still escaped, as is
+    the title, rule and every cited event id.
+    """
+    badge_class = _SEVERITY_CLASSES.get(row.severity, "sev-default")
+    events = ", ".join(escape(event_id) for event_id in row.event_ids)
+    return (
+        '<li class="risk">'
+        f'<span class="sev {badge_class}">{escape(row.severity)}</span>'
+        "<div>"
+        f'<p class="risk-title">{escape(row.title)}</p>'
+        f'<p class="risk-meta">{escape(row.rule)} rule; source events {events}</p>'
+        "</div>"
+        "</li>"
+    )
+
+
+def _render_active_risks(view: DashboardView) -> str:
+    """Render the active-risks panel: the current risks, most urgent first.
+
+    No active risks is good news, not a gap, so the empty state says so plainly.
+    Every risk is the deterministic output of a rule, carried through unchanged, so
+    the panel names the rule and the source events behind each one.
+    """
+    if not view.active_risks:
+        return (
+            '<section class="panel">'
+            "<h2>Active risks</h2>"
+            '<p class="empty">No active risks across the stored events.</p>'
+            "</section>"
+        )
+    count = len(view.active_risks)
+    caption = (
+        "1 active risk, most urgent first."
+        if count == 1
+        else f"{count} active risks, most urgent first."
+    )
+    rows = "\n".join(_render_risk_row(row) for row in view.active_risks)
+    return (
+        '<section class="panel">'
+        "<h2>Active risks</h2>"
+        f'<p class="caption">{escape(caption)}</p>'
+        f'<ul class="risks">\n{rows}\n</ul>'
+        "</section>"
+    )
 
 
 def _render_event_row(row: RecentEventRow) -> str:
@@ -148,6 +238,7 @@ def render_dashboard_page(view: DashboardView) -> str:
     later dashboard views render some of these panels inline, and this page
     states plainly that it does so.
     """
+    active_risks = _render_active_risks(view)
     recent_events = _render_recent_events(view)
     links = "\n".join(_render_link(link) for link in view.links)
     return f"""<!DOCTYPE html>
@@ -166,8 +257,9 @@ def render_dashboard_page(view: DashboardView) -> str:
 </header>
 <p class="lead">Turn structured operational events into daily briefs, risk warnings and
 incident summaries. This dashboard is a server-rendered face over the existing API;
-the recent-events panel is rendered inline, and the links below reach the other JSON
-endpoints.</p>
+the active-risks and recent-events panels are rendered inline, and the links below
+reach the other JSON endpoints.</p>
+{active_risks}
 {recent_events}
 <ul class="links">
 {links}
