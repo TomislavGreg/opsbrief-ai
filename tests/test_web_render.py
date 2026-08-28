@@ -1,6 +1,27 @@
 """Tests for rendering the dashboard view to HTML."""
 
-from opsbrief.web import DashboardLink, DashboardView, RecentEventRow, render_dashboard_page
+from opsbrief.web import (
+    DashboardLink,
+    DashboardView,
+    RecentEventRow,
+    RiskRow,
+    render_dashboard_page,
+)
+
+_RISKS = (
+    RiskRow(
+        title="Integration ticketing has failed 5 times",
+        severity="critical",
+        rule="repeated_integration_failure",
+        event_ids=("e17", "e18", "e19", "e20", "e21"),
+    ),
+    RiskRow(
+        title="Safety inspection for North Stand is overdue",
+        severity="high",
+        rule="overdue_work",
+        event_ids=("e04",),
+    ),
+)
 
 _ROWS = (
     RecentEventRow(
@@ -29,6 +50,7 @@ _VIEW = DashboardView(
         DashboardLink(label="Risks", href="/risks", description="The current risks."),
         DashboardLink(label="Daily brief", href="/brief", description="The daily brief."),
     ),
+    active_risks=_RISKS,
     recent_events=_ROWS,
     total_events=2,
 )
@@ -152,6 +174,78 @@ def test_recent_event_fields_are_escaped() -> None:
 
     assert "<script>alert(1)</script>" not in html
     assert "Broadcast &lt;script&gt;" in html
+
+
+def test_page_renders_the_active_risks_panel() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "Active risks" in html
+    assert "Integration ticketing has failed 5 times" in html
+    assert "Safety inspection for North Stand is overdue" in html
+    # Each risk names its rule and cites its source events.
+    assert "repeated_integration_failure rule; source events e17, e18, e19, e20, e21" in html
+    assert "overdue_work rule; source events e04" in html
+
+
+def test_risk_severity_is_shown_as_a_badge() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "sev-critical" in html
+    assert "sev-high" in html
+
+
+def test_unknown_risk_severity_falls_back_to_a_neutral_badge() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        active_risks=(
+            RiskRow(title="Odd risk", severity="unheard-of", rule="some_rule", event_ids=("e1",)),
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "sev-default" in html
+
+
+def test_no_active_risks_shows_an_empty_state() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        active_risks=(),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No active risks across the stored events." in html
+    assert 'class="risks"' not in html
+
+
+def test_risk_fields_are_escaped() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        active_risks=(
+            RiskRow(
+                title="Feed <script>alert(1)</script> failing",
+                severity="high",
+                rule="repeated_integration_failure",
+                event_ids=("e<1>",),
+            ),
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "<script>alert(1)</script>" not in html
+    assert "Feed &lt;script&gt;" in html
+    assert "e&lt;1&gt;" in html
 
 
 def test_rendering_is_pure() -> None:
