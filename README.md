@@ -216,11 +216,14 @@ produced it.
   dependencies can be scanned for known advisories with one command.
 - A server-rendered dashboard at `GET /dashboard`: a small HTML page, built from the
   standard library with no template engine or client-side framework, showing the
-  running service's identity (name, environment, version) and links into the read
-  endpoints (the daily brief, risks, events, incidents, health and the API docs). It
-  is the shell of the demo interface: later views render some of those panels inline.
-  Every dynamic value is escaped as it is rendered, and the page reads no store, so
-  it renders the same on an empty database.
+  running service's identity (name, environment, version), a bounded newest-first
+  panel of the most recent stored events, and links into the remaining read
+  endpoints (the daily brief, risks, all events, incidents, health and the API docs).
+  The recent-events panel shows the ten most recent events with the fields a brief
+  describes an event with (not the free-form metadata) and reports when it is showing
+  a bounded view; an empty store shows an empty state rather than a table. Every
+  dynamic value is escaped as it is rendered. It is the first inline view of the demo
+  interface: later views render the other panels inline in the same way.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -1753,20 +1756,29 @@ no new dependency and no build step.
 curl http://127.0.0.1:8000/dashboard
 ```
 
-The shell shows the running service's identity (name, environment and version, the
-same the `/health` endpoint reports) and links into the read endpoints a duty
-manager reaches for: the daily brief, the current risks, the stored events, tracked
-incidents, health and the interactive API docs. It is the first step of the demo
-interface: the later views render some of those panels inline in place of the link,
-against the same endpoints.
+The page shows the running service's identity (name, environment and version, the
+same the `/health` endpoint reports), a panel of the most recent stored events, and
+links into the remaining read endpoints a duty manager reaches for: the daily brief,
+the current risks, all events, tracked incidents, health and the interactive API
+docs. The recent-events panel is the first view rendered inline; the later views
+render the other panels inline in place of their link, against the same endpoints.
+
+The recent-events panel shows the ten most recent events, newest occurred first,
+read from the event store the same way the `GET /events` listing reads it. Each row
+carries the fields a brief digest or a timeline entry describes an event with (when
+it occurred, its source, type, subject, severity and status) and leaves out the
+free-form `metadata`, so nothing sensitive reaches the page. When the store holds
+more than ten events a caption names how many of the total are on view, and the full,
+filterable listing stays a click away under the All events link. On an empty store
+the panel shows an empty state rather than a table.
 
 The page is assembled in three thin layers, mirroring the rest of the service. A
-`DashboardView` view model carries what the page shows; a service builds it from
-the settings, reading no store, so the shell renders the same whether or not any
-events have been recorded; and a render module turns the view into a self-contained
-HTML document. Every dynamic value (the service name, the environment label) is
-escaped as it is placed, so an operator-supplied setting cannot inject markup, and
-the rendering is a pure function of the view.
+`DashboardView` view model carries what the page shows; a service builds it from the
+settings and the event store, reducing each recent event to a display row; and a
+render module turns the view into a self-contained HTML document. Every dynamic value
+(the service name, the environment label, every event field) is escaped as it is
+placed, so neither an operator-supplied setting nor a producer-supplied event field
+can inject markup, and the rendering is a pure function of the view.
 
 ## Development Commands
 
@@ -1876,8 +1888,8 @@ started only once the API and core services are stable.
 | AI-065 | Add QC incident example | Game Center readiness | Done |
 | AI-066 | Add deployment documentation | Game Center readiness | Done |
 | AI-070 | Add simple server-rendered dashboard | Demo interface | Done |
-| AI-071 | Display recent events | Demo interface | In Progress |
-| AI-072 | Display active risks | Demo interface | Backlog |
+| AI-071 | Display recent events | Demo interface | Done |
+| AI-072 | Display active risks | Demo interface | Ready |
 | AI-073 | Display the latest daily brief | Demo interface | Backlog |
 | AI-074 | Display incidents and timelines | Demo interface | Backlog |
 | AI-075 | Add a public demo-data mode | Demo interface | Backlog |
@@ -1920,8 +1932,9 @@ a real environment (AI-066).
 Phase 7 (Demo interface) is under way: a server-rendered dashboard over the
 existing API, started now that the API and core services are stable. The dashboard
 shell is in place at `GET /dashboard` (AI-070), a small standard-library HTML page
-showing the service identity and links into the read endpoints. AI-071 (display
-recent events), the first inline panel, is Ready as the next step. When a ticket's
+showing the service identity and links into the read endpoints, and it now renders
+the most recent stored events inline as its first panel (AI-071). AI-072 (display
+active risks), the next inline panel, is Ready as the following step. When a ticket's
 dependencies are complete, promote it to Ready so the next change has a clear
 starting point.
 
@@ -1934,6 +1947,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-28 - Added a recent-events panel to the dashboard: `GET /dashboard` now reads the most recent stored events and renders them inline as a bounded, newest-first table above the navigation links, showing the fields a brief describes an event with (not the free-form metadata) and reporting when the view is bounded. An empty store shows an empty state rather than a table, and every event field is escaped as it is placed. This is the first inline view of Phase 7's demo interface.
 - 2026-08-27 - Added a server-rendered dashboard shell at `GET /dashboard`: a small standard-library HTML page (no template engine, no client-side framework) showing the running service's identity and links into the read endpoints (the daily brief, risks, events, incidents, health and the API docs). It is assembled in three thin layers (a `DashboardView` view model, a service that builds it from the settings without reading any store, and a render module that escapes every dynamic value), and is the first step of Phase 7's demo interface.
 - 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
 - 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
@@ -1947,7 +1961,6 @@ it is not picked up and left half-finished.
 - 2026-08-21 - Added confidence and missing-data warnings to generated output: a daily brief and an incident summary carry the gaps in their picture as structured `warnings`, each pairing a machine-readable code with the message the note beside it shows, and a `confidence` level derived from those warnings, bumping the brief and incident-summary output versions.
 - 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
 - 2026-08-19 - Added configurable AI context exclusion: a deployment can hold named event fields back from the material a model is shown through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`, replacing each with a visible `[excluded]` marker in the brief and incident-summary material while the deterministic picture a reader acts on stays unchanged.
-- 2026-08-18 - Added sensitive-metadata redaction: a metadata value whose key names a sensitive term is masked with a visible `[redacted]` marker at ingestion, so it never reaches the store or a later read, with the built-in term set widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
 
 ## Future Game Center Integration
 
