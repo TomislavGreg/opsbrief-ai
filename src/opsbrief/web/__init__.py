@@ -7,11 +7,12 @@ dynamic value is escaped as it is rendered.
 """
 
 from opsbrief.web.render import render_dashboard_page
-from opsbrief.web.schema import DashboardLink, DashboardView, RecentEventRow
+from opsbrief.web.schema import DashboardLink, DashboardView, RecentEventRow, RiskRow
 
 __all__ = [
     "DashboardLink",
     "DashboardView",
     "RecentEventRow",
+    "RiskRow",
     "render_dashboard_page",
 ]
