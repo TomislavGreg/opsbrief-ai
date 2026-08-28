@@ -5,6 +5,20 @@ from fastapi.testclient import TestClient
 from opsbrief import __version__
 
 
+def _post_event(client: TestClient, **overrides: object) -> None:
+    payload = {
+        "source": "integrations",
+        "event_type": "integration.failed",
+        "subject": "Ticketing webhook failed",
+        "occurred_at": "2026-07-29T14:05:00Z",
+        "severity": "high",
+        "status": "failed",
+    }
+    payload.update(overrides)
+    response = client.post("/events", json=payload)
+    assert response.status_code == 201
+
+
 def test_dashboard_returns_html(client: TestClient) -> None:
     response = client.get("/dashboard")
 
@@ -28,11 +42,49 @@ def test_dashboard_links_into_the_read_endpoints(client: TestClient) -> None:
 
 
 def test_dashboard_renders_without_any_stored_events(client: TestClient) -> None:
-    # The shell reads the settings, not the store, so it renders on an empty
-    # database exactly as it would with events recorded.
+    # With no events the recent-events panel shows its empty state rather than a
+    # table, and the rest of the page is unaffected.
     response = client.get("/dashboard")
 
     assert response.status_code == 200
+    assert "No operational events have been recorded yet." in response.text
+
+
+def test_dashboard_shows_a_recorded_event(client: TestClient) -> None:
+    _post_event(client, subject="Broadcast feed dropped")
+
+    body = client.get("/dashboard").text
+
+    assert "Broadcast feed dropped" in body
+    assert "integration.failed" in body
+    assert "No operational events have been recorded yet." not in body
+
+
+def test_dashboard_shows_newest_events_first(client: TestClient) -> None:
+    _post_event(client, subject="Earlier event", occurred_at="2026-07-29T09:00:00Z")
+    _post_event(client, subject="Later event", occurred_at="2026-07-29T18:00:00Z")
+
+    body = client.get("/dashboard").text
+
+    assert body.index("Later event") < body.index("Earlier event")
+
+
+def test_dashboard_bounds_the_recent_events_panel(client: TestClient) -> None:
+    for minute in range(12):
+        _post_event(
+            client,
+            subject=f"Event {minute:02d}",
+            occurred_at=f"2026-07-29T10:{minute:02d}:00Z",
+            external_id=f"evt-{minute:02d}",
+        )
+
+    body = client.get("/dashboard").text
+
+    # The panel is capped at ten rows, and the caption reports the bounded view.
+    assert "Showing the 10 most recent of 12 events." in body
+    # The two oldest of the twelve fall outside the ten-row window.
+    assert "Event 11" in body
+    assert "Event 00" not in body
 
 
 def test_dashboard_is_in_the_openapi_schema(client: TestClient) -> None:
