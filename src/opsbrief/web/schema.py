@@ -38,18 +38,36 @@ class RecentEventRow:
 
 
 @dataclass(frozen=True)
+class RiskRow:
+    """One active risk as the dashboard's risks panel shows it.
+
+    Every field is the rule's own deterministic output, carried straight from the
+    detected :class:`~opsbrief.risks.schema.Risk`: the ``rule`` that raised it, its
+    one-line ``title``, its ``severity``, and the source ``event_ids`` behind it so
+    the panel stays traceable to the evidence. No model takes part.
+    """
+
+    title: str
+    severity: str
+    rule: str
+    event_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DashboardView:
     """The material the dashboard renders.
 
-    It carries the running service's identity, a bounded newest-first view of the
-    most recent stored events, and the set of links into the JSON endpoints. The
-    recent-events panel is the first view rendered inline; the remaining links are
-    still presented as navigation, and later views fill them in the same way.
+    It carries the running service's identity, the current active risks in
+    priority order, a bounded newest-first view of the most recent stored events,
+    and the set of links into the JSON endpoints. The risks and recent-events
+    panels are rendered inline; the remaining links are still presented as
+    navigation, and later views fill them in the same way.
     """
 
     service_name: str
     environment: str
     version: str
     links: tuple[DashboardLink, ...]
+    active_risks: tuple[RiskRow, ...] = ()
     recent_events: tuple[RecentEventRow, ...] = ()
     total_events: int = 0
