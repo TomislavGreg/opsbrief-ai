@@ -9,6 +9,7 @@ own beyond assembling and rendering that view.
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
+from opsbrief.api.dependencies import EventStoreDependency
 from opsbrief.config import get_settings
 from opsbrief.services import build_dashboard_view
 from opsbrief.web import render_dashboard_page
@@ -20,14 +21,15 @@ router = APIRouter(tags=["dashboard"])
     "/dashboard",
     response_class=HTMLResponse,
     summary="Server-rendered operations dashboard",
-    response_description="An HTML page linking into the read endpoints.",
+    response_description="An HTML page showing recent events and linking into the read endpoints.",
 )
-def read_dashboard() -> HTMLResponse:
-    """Return the dashboard shell as an HTML page.
+def read_dashboard(store: EventStoreDependency) -> HTMLResponse:
+    """Return the dashboard as an HTML page.
 
-    The page shows the running service's identity and links into the existing
-    read endpoints. It is a server-rendered view for a person, built from the
-    same settings the API uses, and holds no state of its own.
+    The page shows the running service's identity, a bounded newest-first panel of
+    the most recent stored events, and links into the remaining read endpoints. It
+    is a server-rendered view for a person, built from the same settings and event
+    store the JSON API uses, and holds no state of its own.
     """
-    view = build_dashboard_view(get_settings())
+    view = build_dashboard_view(get_settings(), store)
     return HTMLResponse(render_dashboard_page(view))
