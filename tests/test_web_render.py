@@ -1,6 +1,25 @@
 """Tests for rendering the dashboard view to HTML."""
 
-from opsbrief.web import DashboardLink, DashboardView, render_dashboard_page
+from opsbrief.web import DashboardLink, DashboardView, RecentEventRow, render_dashboard_page
+
+_ROWS = (
+    RecentEventRow(
+        occurred_at="2026-07-29 14:05 UTC",
+        source="integrations",
+        event_type="integration.failed",
+        subject="Ticketing webhook failed",
+        severity="high",
+        status="failed",
+    ),
+    RecentEventRow(
+        occurred_at="2026-07-29 11:30 UTC",
+        source="rostering",
+        event_type="shift.unfilled",
+        subject="Steward shift for fixture 4821 is one short",
+        severity="high",
+        status="",
+    ),
+)
 
 _VIEW = DashboardView(
     service_name="OpsBrief AI",
@@ -10,6 +29,8 @@ _VIEW = DashboardView(
         DashboardLink(label="Risks", href="/risks", description="The current risks."),
         DashboardLink(label="Daily brief", href="/brief", description="The daily brief."),
     ),
+    recent_events=_ROWS,
+    total_events=2,
 )
 
 
@@ -57,6 +78,80 @@ def test_dynamic_values_are_escaped() -> None:
     assert "dev&amp;prod" in html
     assert "Events &lt;b&gt;" in html
     assert "/events?source=a&amp;type=b" in html
+
+
+def test_page_renders_the_recent_events_panel() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "Recent events" in html
+    assert "Ticketing webhook failed" in html
+    assert "Steward shift for fixture 4821 is one short" in html
+    assert "integration.failed" in html
+    assert "2026-07-29 14:05 UTC" in html
+
+
+def test_event_with_no_status_renders_a_placeholder() -> None:
+    # The second row has no status; it must not leave an empty cell that reads as
+    # a missing column, so a dash stands in for it.
+    html = render_dashboard_page(_VIEW)
+
+    assert "&mdash;" in html
+
+
+def test_empty_store_shows_an_empty_state_not_a_table() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        recent_events=(),
+        total_events=0,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No operational events have been recorded yet." in html
+    assert '<table class="events">' not in html
+
+
+def test_caption_reports_a_bounded_view() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        recent_events=_ROWS,
+        total_events=42,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "Showing the 2 most recent of 42 events." in html
+
+
+def test_recent_event_fields_are_escaped() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        recent_events=(
+            RecentEventRow(
+                occurred_at="2026-07-29 14:05 UTC",
+                source="integrations",
+                event_type="integration.failed",
+                subject="Broadcast <script>alert(1)</script> feed",
+                severity="high",
+                status="failed",
+            ),
+        ),
+        total_events=1,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "<script>alert(1)</script>" not in html
+    assert "Broadcast &lt;script&gt;" in html
 
 
 def test_rendering_is_pure() -> None:
