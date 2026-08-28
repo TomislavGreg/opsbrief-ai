@@ -87,6 +87,36 @@ def test_dashboard_bounds_the_recent_events_panel(client: TestClient) -> None:
     assert "Event 00" not in body
 
 
+def test_dashboard_shows_no_active_risks_when_there_are_none(client: TestClient) -> None:
+    # A single ordinary event raises no risk, so the risks panel says so.
+    _post_event(client, severity="low", status="resolved", subject="All clear")
+
+    body = client.get("/dashboard").text
+
+    assert "No active risks across the stored events." in body
+
+
+def test_dashboard_shows_a_detected_risk(client: TestClient) -> None:
+    # An unresolved event whose deadline is long past is overdue, and overdue work
+    # has no recency window, so the risk fires whatever the moment of the request.
+    _post_event(
+        client,
+        source="rostering",
+        event_type="task.scheduled",
+        subject="Safety inspection for North Stand",
+        status="open",
+        occurred_at="2020-01-01T09:00:00Z",
+        due_at="2020-01-01T18:00:00Z",
+        external_id="inspection-1",
+    )
+
+    body = client.get("/dashboard").text
+
+    assert "Active risks" in body
+    assert "overdue_work rule; source events" in body
+    assert "No active risks across the stored events." not in body
+
+
 def test_dashboard_is_in_the_openapi_schema(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
