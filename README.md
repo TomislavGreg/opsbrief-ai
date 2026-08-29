@@ -216,10 +216,15 @@ produced it.
   dependencies can be scanned for known advisories with one command.
 - A server-rendered dashboard at `GET /dashboard`: a small HTML page, built from the
   standard library with no template engine or client-side framework, showing the
-  running service's identity (name, environment, version), an active-risks panel, a
-  bounded newest-first panel of the most recent stored events, and links into the
-  remaining read endpoints (the daily brief, all events, incidents, health and the
-  API docs). The active-risks panel runs the canonical rule set over the whole event
+  running service's identity (name, environment, version), a daily-brief panel, an
+  active-risks panel, a bounded newest-first panel of the most recent stored events,
+  and links into the remaining read endpoints (the daily brief, all events, incidents,
+  health and the API docs). The daily-brief panel is the current brief across the whole
+  event history at request time, phrased the same way `GET /brief` phrases it: it shows
+  the model-written summary with the model that phrased it, the derived confidence level
+  as a badge, and the notes on where the picture is incomplete, degrading to a plain
+  message when the provider returns no summary rather than blanking the page. The
+  active-risks panel runs the canonical rule set over the whole event
   history at request time, the same way `GET /risks` does, and shows each risk with
   its severity as a badge, naming the rule and the source events behind it; no active
   risks shows an all-clear empty state. The recent-events panel shows the ten most
@@ -1761,12 +1766,25 @@ curl http://127.0.0.1:8000/dashboard
 ```
 
 The page shows the running service's identity (name, environment and version, the
-same the `/health` endpoint reports), an active-risks panel, a panel of the most
-recent stored events, and links into the remaining read endpoints a duty manager
-reaches for: the daily brief, all events, tracked incidents, health and the
-interactive API docs. The risks and recent-events panels are rendered inline; the
-later views render the other panels inline in place of their link, against the same
-endpoints.
+same the `/health` endpoint reports), a daily-brief panel, an active-risks panel, a
+panel of the most recent stored events, and links into the remaining read endpoints a
+duty manager reaches for: the daily brief, all events, tracked incidents, health and
+the interactive API docs. The brief, risks and recent-events panels are rendered
+inline; the later views render the other panels inline in place of their link, against
+the same endpoints.
+
+The daily-brief panel is the current brief across the whole event history at the
+moment of the request, phrased the same way `GET /brief` phrases it. It shows the
+model-written summary alongside what lets a reader weigh it: the model that phrased
+it, the derived confidence level as a badge, and the notes on where the picture is
+incomplete. Only the summary comes from a language model, and it is carried through
+already bounded and collapsed as untrusted output; the prioritized risks and source
+references the full brief also holds are shown by the other panels and the JSON
+endpoints, so they are not duplicated here. When the model returns no summary, or the
+provider is unavailable, the panel says so plainly and the notes explain why, so a
+provider outage never blanks the page. Any event fields a deployment holds back
+through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS` are kept out of the material the model
+is shown, exactly as for `GET /brief`.
 
 The active-risks panel runs the canonical rule set over the whole event history at
 the moment of the request, the same way `GET /risks` does, and lists the resulting
@@ -1787,9 +1805,10 @@ the panel shows an empty state rather than a table.
 
 The page is assembled in three thin layers, mirroring the rest of the service. A
 `DashboardView` view model carries what the page shows; a service builds it from the
-settings and the event store, computing the risks the same way `GET /risks` does and
-reducing each risk and recent event to a display row; and a render module turns the
-view into a self-contained HTML document. Every dynamic value (the service name, the
+settings, the event store and the provider, generating the brief the same way
+`GET /brief` does and computing the risks the same way `GET /risks` does, then reducing
+the brief, each risk and each recent event to a display row; and a render module turns
+the view into a self-contained HTML document. Every dynamic value (the service name, the
 environment label, every risk and event field) is escaped as it is placed, so neither
 an operator-supplied setting nor a producer-supplied field can inject markup, and the
 rendering is a pure function of the view.
@@ -1904,8 +1923,8 @@ started only once the API and core services are stable.
 | AI-070 | Add simple server-rendered dashboard | Demo interface | Done |
 | AI-071 | Display recent events | Demo interface | Done |
 | AI-072 | Display active risks | Demo interface | Done |
-| AI-073 | Display the latest daily brief | Demo interface | In Progress |
-| AI-074 | Display incidents and timelines | Demo interface | Backlog |
+| AI-073 | Display the latest daily brief | Demo interface | Done |
+| AI-074 | Display incidents and timelines | Demo interface | Ready |
 | AI-075 | Add a public demo-data mode | Demo interface | Backlog |
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
@@ -1947,10 +1966,11 @@ Phase 7 (Demo interface) is under way: a server-rendered dashboard over the
 existing API, started now that the API and core services are stable. The dashboard
 shell is in place at `GET /dashboard` (AI-070), a small standard-library HTML page
 showing the service identity and links into the read endpoints, and it now renders
-the current active risks (AI-072) and the most recent stored events (AI-071) inline
-as its first two panels. AI-073 (display the latest daily brief), the next inline
-panel, is Ready as the following step. When a ticket's dependencies are complete,
-promote it to Ready so the next change has a clear starting point.
+the latest daily brief (AI-073), the current active risks (AI-072) and the most recent
+stored events (AI-071) inline as its first three panels. AI-074 (display incidents and
+timelines), the next inline panel, is Ready as the following step. When a ticket's
+dependencies are complete, promote it to Ready so the next change has a clear starting
+point.
 
 ### Maintaining the CI workflow
 
@@ -1961,6 +1981,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-29 - Added a daily-brief panel to the dashboard: `GET /dashboard` now generates the current brief across the whole event history at request time (the same way `GET /brief` does) and renders it inline above the active-risks panel, showing the model-phrased summary with the model that phrased it, the derived confidence level as a badge and the notes on where the picture is incomplete. Only the summary comes from the model and it is escaped as it is placed; when the provider returns no summary the panel says so plainly rather than blanking the page.
 - 2026-08-28 - Added an active-risks panel to the dashboard: `GET /dashboard` now runs the canonical risk rules over the whole event history at request time (the same way `GET /risks` does) and renders the prioritized result inline above the recent-events table, showing each risk's severity as a badge and naming the rule and source events behind it. No active risks shows an all-clear empty state, and every risk field is escaped as it is placed.
 - 2026-08-28 - Added a recent-events panel to the dashboard: `GET /dashboard` now reads the most recent stored events and renders them inline as a bounded, newest-first table above the navigation links, showing the fields a brief describes an event with (not the free-form metadata) and reporting when the view is bounded. An empty store shows an empty state rather than a table, and every event field is escaped as it is placed. This is the first inline view of Phase 7's demo interface.
 - 2026-08-27 - Added a server-rendered dashboard shell at `GET /dashboard`: a small standard-library HTML page (no template engine, no client-side framework) showing the running service's identity and links into the read endpoints (the daily brief, risks, events, incidents, health and the API docs). It is assembled in three thin layers (a `DashboardView` view model, a service that builds it from the settings without reading any store, and a render module that escapes every dynamic value), and is the first step of Phase 7's demo interface.
@@ -1974,7 +1995,6 @@ it is not picked up and left half-finished.
 - 2026-08-23 - Added a security policy and dependency scanning: `SECURITY.md` records how to report a vulnerability, which versions are supported and the design choices that keep the service safe, and `pip-audit` ships in the `dev` extra so the installed dependencies can be scanned for known advisories with one command. Automating the scan in CI is tracked separately as it needs a workflow change a maintainer applies.
 - 2026-08-22 - Added structured generation audit records: a daily brief or an incident summary can be projected into a compact, uniform `GenerationAudit` naming what the output was produced from (its source and missing event ids) and by (its model and prompt and output versions), alongside the confidence and warning codes it reported, derived from the output and holding no model involvement of its own.
 - 2026-08-21 - Added confidence and missing-data warnings to generated output: a daily brief and an incident summary carry the gaps in their picture as structured `warnings`, each pairing a machine-readable code with the message the note beside it shows, and a `confidence` level derived from those warnings, bumping the brief and incident-summary output versions.
-- 2026-08-20 - Added source references to generated output: a daily brief and an incident summary now resolve every cited event id to a compact `SourceReference` describing what the event was, in the same order as their `source_event_ids`, with an unresolved reference for any cited id no stored event answers to, bumping the brief and incident-summary output versions.
 
 ## Future Game Center Integration
 
