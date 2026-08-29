@@ -70,6 +70,30 @@ ul.risks li.risk {
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+.brief {
+  background: #fff;
+  border: 1px solid #e2e2e2;
+  border-radius: 0.6rem;
+  padding: 0.75rem 1rem;
+}
+.brief .summary { margin: 0; font-size: 1.05rem; }
+.brief .summary.empty { color: #555; font-style: italic; }
+.brief .meta { margin: 0.6rem 0 0; color: #555; font-size: 0.85rem; }
+.conf {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.conf-high { background: #dcfce7; color: #166534; }
+.conf-medium { background: #fef9c3; color: #854d0e; }
+.conf-low { background: #ffedd5; color: #9a3412; }
+.conf-none { background: #e5e7eb; color: #374151; }
+.brief .notes { margin: 0.6rem 0 0; padding-left: 1.1rem; color: #555; font-size: 0.85rem; }
+.brief .notes li { margin: 0.15rem 0; }
 .sev-critical { background: #fee2e2; color: #991b1b; }
 .sev-high { background: #ffedd5; color: #9a3412; }
 .sev-medium { background: #fef9c3; color: #854d0e; }
@@ -117,6 +141,60 @@ _SEVERITY_CLASSES = {
     "medium": "sev-medium",
     "low": "sev-low",
 }
+
+
+#: Confidence level to the badge class it is shown with. A level outside the set
+#: falls back to a neutral badge, so an unexpected value is never placed into the
+#: class attribute unescaped.
+_CONFIDENCE_CLASSES = {
+    "high": "conf-high",
+    "medium": "conf-medium",
+    "low": "conf-low",
+    "none": "conf-none",
+}
+
+
+def _render_brief_notes(notes: tuple[str, ...]) -> str:
+    """Render the brief's incompleteness notes as a list, escaping each one.
+
+    Returns the empty string when there are no notes, so a complete picture adds
+    nothing to the panel.
+    """
+    if not notes:
+        return ""
+    items = "".join(f"<li>{escape(note)}</li>" for note in notes)
+    return f'<ul class="notes">{items}</ul>'
+
+
+def _render_brief(view: DashboardView) -> str:
+    """Render the daily-brief panel: the model summary and how far to trust it.
+
+    Only the summary comes from a model, and it is carried through already bounded
+    and collapsed by the brief pipeline; it is still escaped as it is placed. The
+    panel names the model that phrased it and the derived confidence level, and
+    lists the notes on where the picture is incomplete. When the summary is empty
+    (the provider was unavailable or returned nothing) the panel says so plainly
+    rather than showing a blank line, and the notes explain why.
+    """
+    brief = view.brief
+    if brief is None:
+        return ""
+    badge_class = _CONFIDENCE_CLASSES.get(brief.confidence, "conf-none")
+    if brief.summary:
+        summary = f'<p class="summary">{escape(brief.summary)}</p>'
+    else:
+        summary = '<p class="summary empty">No summary was phrased for the current picture.</p>'
+    return (
+        '<section class="panel">'
+        "<h2>Daily brief</h2>"
+        '<div class="brief">'
+        f"{summary}"
+        f'<p class="meta">Phrased by {escape(brief.model)}; confidence '
+        f'<span class="conf {badge_class}">{escape(brief.confidence)}</span></p>'
+        f"{_render_brief_notes(brief.notes)}"
+        "</div>"
+        "</section>"
+    )
 
 
 def _render_risk_row(row: RiskRow) -> str:
@@ -238,6 +316,7 @@ def render_dashboard_page(view: DashboardView) -> str:
     later dashboard views render some of these panels inline, and this page
     states plainly that it does so.
     """
+    brief = _render_brief(view)
     active_risks = _render_active_risks(view)
     recent_events = _render_recent_events(view)
     links = "\n".join(_render_link(link) for link in view.links)
@@ -257,8 +336,9 @@ def render_dashboard_page(view: DashboardView) -> str:
 </header>
 <p class="lead">Turn structured operational events into daily briefs, risk warnings and
 incident summaries. This dashboard is a server-rendered face over the existing API;
-the active-risks and recent-events panels are rendered inline, and the links below
-reach the other JSON endpoints.</p>
+the daily-brief, active-risks and recent-events panels are rendered inline, and the
+links below reach the other JSON endpoints.</p>
+{brief}
 {active_risks}
 {recent_events}
 <ul class="links">
