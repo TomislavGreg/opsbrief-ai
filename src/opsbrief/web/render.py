@@ -10,7 +10,14 @@ always produces the same page.
 
 from html import escape
 
-from opsbrief.web.schema import DashboardLink, DashboardView, RecentEventRow, RiskRow
+from opsbrief.web.schema import (
+    DashboardLink,
+    DashboardView,
+    IncidentRow,
+    RecentEventRow,
+    RiskRow,
+    TimelineEntryRow,
+)
 
 _STYLE = """
 :root { color-scheme: light dark; }
@@ -118,6 +125,44 @@ ul.risks li.risk {
 .events tr:last-child td { border-bottom: none; }
 .events td.subject { width: 40%; }
 .events time { color: #555; white-space: nowrap; }
+ul.incidents { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
+ul.incidents li.incident {
+  background: #fff;
+  border: 1px solid #e2e2e2;
+  border-radius: 0.6rem;
+  padding: 0.75rem 1rem;
+}
+.incident-head { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+.incident-title { margin: 0; font-weight: 600; }
+.incident-meta { margin: 0.3rem 0 0; color: #555; font-size: 0.85rem; }
+.status {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.status-open { background: #fee2e2; color: #991b1b; }
+.status-investigating { background: #ffedd5; color: #9a3412; }
+.status-monitoring { background: #fef9c3; color: #854d0e; }
+.status-resolved { background: #dcfce7; color: #166534; }
+.status-closed { background: #e5e7eb; color: #374151; }
+.status-default { background: #e5e7eb; color: #374151; }
+ul.timeline {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0 0 0 0.9rem;
+  border-left: 2px solid #eee;
+  display: grid;
+  gap: 0.35rem;
+}
+ul.timeline li { font-size: 0.85rem; }
+ul.timeline time { color: #555; white-space: nowrap; }
+.timeline-src { color: #555; }
+.incident .missing { margin: 0.5rem 0 0; color: #9a3412; font-size: 0.8rem; }
+.incident .no-timeline { margin: 0.5rem 0 0; color: #555; font-size: 0.85rem; }
 ul.links { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
 ul.links li {
   background: #fff;
@@ -298,6 +343,106 @@ def _render_recent_events(view: DashboardView) -> str:
     )
 
 
+#: Incident lifecycle status to the badge class it is shown with. A status outside
+#: the set falls back to a neutral badge, so an unexpected value is never placed
+#: into the class attribute unescaped.
+_STATUS_CLASSES = {
+    "open": "status-open",
+    "investigating": "status-investigating",
+    "monitoring": "status-monitoring",
+    "resolved": "status-resolved",
+    "closed": "status-closed",
+}
+
+
+def _render_timeline_entry(entry: TimelineEntryRow) -> str:
+    """Render one timeline event, escaping every field.
+
+    The line reads as when it happened, what produced it and what it was, so an
+    incident's events read forward in time. ``status`` is folded into the subject
+    line only when the producer stated one.
+    """
+    status = f" ({escape(entry.status)})" if entry.status else ""
+    return (
+        "<li>"
+        f"<time>{escape(entry.occurred_at)}</time> "
+        f'<span class="timeline-src">{escape(entry.source)} {escape(entry.event_type)}</span> '
+        f"{escape(entry.subject)}{status}"
+        "</li>"
+    )
+
+
+def _render_incident(row: IncidentRow) -> str:
+    """Render one incident card with its timeline, escaping every field.
+
+    The status badge class comes from a fixed lookup, so only a known status
+    reaches the class attribute; the severity badge reuses the risk severity
+    lookup the same way. The timeline lists the incident's cited events oldest
+    first; when no cited event resolves the card says so plainly, and any cited id
+    no stored event answers to is named as a gap in the evidence.
+    """
+    status_class = _STATUS_CLASSES.get(row.status, "status-default")
+    severity_class = _SEVERITY_CLASSES.get(row.severity, "sev-default")
+    span = f"; timeline {escape(row.span)}" if row.span else ""
+    if row.entries:
+        entries = "\n".join(_render_timeline_entry(entry) for entry in row.entries)
+        timeline = f'<ul class="timeline">\n{entries}\n</ul>'
+    else:
+        timeline = '<p class="no-timeline">No cited events are stored for this incident.</p>'
+    if row.missing_event_ids:
+        missing = ", ".join(escape(event_id) for event_id in row.missing_event_ids)
+        missing_note = f'<p class="missing">Cited events no longer stored: {missing}.</p>'
+    else:
+        missing_note = ""
+    return (
+        '<li class="incident">'
+        '<div class="incident-head">'
+        f'<span class="status {status_class}">{escape(row.status)}</span>'
+        f'<span class="sev {severity_class}">{escape(row.severity)}</span>'
+        f'<p class="incident-title">{escape(row.title)}</p>'
+        "</div>"
+        f'<p class="incident-meta">Opened {escape(row.opened_at)}{span}</p>'
+        f"{timeline}"
+        f"{missing_note}"
+        "</li>"
+    )
+
+
+def _render_incidents(view: DashboardView) -> str:
+    """Render the incidents panel: tracked incidents, most recently opened first.
+
+    No tracked incidents shows an empty state rather than a list. When the store
+    holds more incidents than the panel shows, a caption names how many of the
+    total are on view, mirroring the way the recent-events panel reports a bounded
+    view. Each incident is shown with its timeline, the disruption read forward in
+    time.
+    """
+    if not view.incidents:
+        return (
+            '<section class="panel">'
+            "<h2>Incidents</h2>"
+            '<p class="empty">No incidents are being tracked.</p>'
+            "</section>"
+        )
+    shown = len(view.incidents)
+    if view.total_incidents > shown:
+        caption = f"Showing the {shown} most recently opened of {view.total_incidents} incidents."
+    else:
+        caption = (
+            f"{shown} tracked incidents, most recently opened first."
+            if shown != 1
+            else "1 tracked incident."
+        )
+    rows = "\n".join(_render_incident(row) for row in view.incidents)
+    return (
+        '<section class="panel">'
+        "<h2>Incidents</h2>"
+        f'<p class="caption">{escape(caption)}</p>'
+        f'<ul class="incidents">\n{rows}\n</ul>'
+        "</section>"
+    )
+
+
 def _render_link(link: DashboardLink) -> str:
     """Render one navigation card, escaping every field."""
     return (
@@ -318,6 +463,7 @@ def render_dashboard_page(view: DashboardView) -> str:
     """
     brief = _render_brief(view)
     active_risks = _render_active_risks(view)
+    incidents = _render_incidents(view)
     recent_events = _render_recent_events(view)
     links = "\n".join(_render_link(link) for link in view.links)
     return f"""<!DOCTYPE html>
@@ -336,10 +482,11 @@ def render_dashboard_page(view: DashboardView) -> str:
 </header>
 <p class="lead">Turn structured operational events into daily briefs, risk warnings and
 incident summaries. This dashboard is a server-rendered face over the existing API;
-the daily-brief, active-risks and recent-events panels are rendered inline, and the
-links below reach the other JSON endpoints.</p>
+the daily-brief, active-risks, incidents and recent-events panels are rendered inline,
+and the links below reach the other JSON endpoints.</p>
 {brief}
 {active_risks}
+{incidents}
 {recent_events}
 <ul class="links">
 {links}

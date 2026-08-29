@@ -4,8 +4,10 @@ from opsbrief.web import (
     BriefPanel,
     DashboardLink,
     DashboardView,
+    IncidentRow,
     RecentEventRow,
     RiskRow,
+    TimelineEntryRow,
     render_dashboard_page,
 )
 
@@ -50,6 +52,34 @@ _ROWS = (
     ),
 )
 
+_INCIDENTS = (
+    IncidentRow(
+        title="Ticketing integration failing repeatedly",
+        status="investigating",
+        severity="high",
+        opened_at="2026-07-29 18:00 UTC",
+        span="2026-07-29 14:05 UTC to 2026-07-29 14:25 UTC",
+        entries=(
+            TimelineEntryRow(
+                occurred_at="2026-07-29 14:05 UTC",
+                source="integrations",
+                event_type="integration.failed",
+                subject="Ticketing webhook failed",
+                severity="high",
+                status="failed",
+            ),
+            TimelineEntryRow(
+                occurred_at="2026-07-29 14:25 UTC",
+                source="integrations",
+                event_type="integration.failed",
+                subject="Ticketing webhook failed again",
+                severity="high",
+                status="",
+            ),
+        ),
+    ),
+)
+
 _VIEW = DashboardView(
     service_name="OpsBrief AI",
     environment="production",
@@ -60,6 +90,8 @@ _VIEW = DashboardView(
     ),
     brief=_BRIEF,
     active_risks=_RISKS,
+    incidents=_INCIDENTS,
+    total_incidents=1,
     recent_events=_ROWS,
     total_events=2,
 )
@@ -354,6 +386,150 @@ def test_page_without_a_brief_omits_the_panel() -> None:
     html = render_dashboard_page(view)
 
     assert "Daily brief" not in html
+
+
+def test_page_renders_the_incidents_panel() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "Incidents" in html
+    assert "Ticketing integration failing repeatedly" in html
+    # The status shows as a badge and the severity reuses the risk severity badge.
+    assert "status-investigating" in html
+    assert ">investigating</span>" in html
+    # The timeline lists the incident's cited events oldest first.
+    assert "Ticketing webhook failed" in html
+    assert html.index("Ticketing webhook failed") < html.index("Ticketing webhook failed again")
+    assert "2026-07-29 14:05 UTC" in html
+
+
+def test_incident_with_no_resolvable_events_says_so() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        incidents=(
+            IncidentRow(
+                title="Lost incident",
+                status="open",
+                severity="medium",
+                opened_at="2026-07-29 18:00 UTC",
+                span="",
+                entries=(),
+                missing_event_ids=("gone-1", "gone-2"),
+            ),
+        ),
+        total_incidents=1,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No cited events are stored for this incident." in html
+    assert "Cited events no longer stored: gone-1, gone-2." in html
+
+
+def test_incidents_panel_reports_a_bounded_view() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        incidents=_INCIDENTS,
+        total_incidents=9,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "Showing the 1 most recently opened of 9 incidents." in html
+
+
+def test_no_incidents_shows_an_empty_state() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        incidents=(),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No incidents are being tracked." in html
+    assert 'class="incidents"' not in html
+
+
+def test_unknown_incident_status_falls_back_to_a_neutral_badge() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        incidents=(
+            IncidentRow(
+                title="Odd incident",
+                status="unheard-of",
+                severity="low",
+                opened_at="2026-07-29 18:00 UTC",
+                span="",
+            ),
+        ),
+        total_incidents=1,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "status-default" in html
+
+
+def test_incident_fields_are_escaped() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        incidents=(
+            IncidentRow(
+                title="Feed <script>alert(1)</script> down",
+                status="open",
+                severity="high",
+                opened_at="2026-07-29 18:00 UTC",
+                span="",
+                entries=(
+                    TimelineEntryRow(
+                        occurred_at="2026-07-29 14:05 UTC",
+                        source="integrations",
+                        event_type="integration.failed",
+                        subject="Broadcast <script>alert(2)</script> feed",
+                        severity="high",
+                        status="failed",
+                    ),
+                ),
+                missing_event_ids=("e<1>",),
+            ),
+        ),
+        total_incidents=1,
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "<script>alert(1)</script>" not in html
+    assert "<script>alert(2)</script>" not in html
+    assert "Feed &lt;script&gt;" in html
+    assert "Broadcast &lt;script&gt;" in html
+    assert "e&lt;1&gt;" in html
+
+
+def test_page_without_incidents_field_shows_the_empty_state() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No incidents are being tracked." in html
 
 
 def test_rendering_is_pure() -> None:
