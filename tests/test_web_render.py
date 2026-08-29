@@ -1,11 +1,19 @@
 """Tests for rendering the dashboard view to HTML."""
 
 from opsbrief.web import (
+    BriefPanel,
     DashboardLink,
     DashboardView,
     RecentEventRow,
     RiskRow,
     render_dashboard_page,
+)
+
+_BRIEF = BriefPanel(
+    summary="One integration keeps failing; deal with the ticketing failures first.",
+    model="fake-1",
+    confidence="high",
+    notes=(),
 )
 
 _RISKS = (
@@ -50,6 +58,7 @@ _VIEW = DashboardView(
         DashboardLink(label="Risks", href="/risks", description="The current risks."),
         DashboardLink(label="Daily brief", href="/brief", description="The daily brief."),
     ),
+    brief=_BRIEF,
     active_risks=_RISKS,
     recent_events=_ROWS,
     total_events=2,
@@ -246,6 +255,105 @@ def test_risk_fields_are_escaped() -> None:
     assert "<script>alert(1)</script>" not in html
     assert "Feed &lt;script&gt;" in html
     assert "e&lt;1&gt;" in html
+
+
+def test_page_renders_the_daily_brief_panel() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "Daily brief" in html
+    assert "One integration keeps failing" in html
+    # The panel names the model that phrased the summary and the confidence level.
+    assert "Phrased by fake-1" in html
+    assert "conf-high" in html
+    assert ">high</span>" in html
+
+
+def test_brief_notes_are_rendered_when_the_picture_is_incomplete() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        brief=BriefPanel(
+            summary="Some risks stand.",
+            model="fake-1",
+            confidence="medium",
+            notes=("Only the most recent events are shown.",),
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "Only the most recent events are shown." in html
+    assert "conf-medium" in html
+
+
+def test_empty_brief_summary_shows_a_placeholder_not_a_blank_line() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        brief=BriefPanel(
+            summary="",
+            model="fake-1",
+            confidence="none",
+            notes=("The AI provider was unavailable.",),
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No summary was phrased for the current picture." in html
+    assert "The AI provider was unavailable." in html
+    assert "conf-none" in html
+
+
+def test_unknown_brief_confidence_falls_back_to_a_neutral_badge() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        brief=BriefPanel(summary="A picture.", model="fake-1", confidence="unheard-of"),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "conf-none" in html
+
+
+def test_brief_summary_is_escaped() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        brief=BriefPanel(
+            summary="Feed <script>alert(1)</script> down",
+            model="fake<1>",
+            confidence="high",
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "<script>alert(1)</script>" not in html
+    assert "Feed &lt;script&gt;" in html
+    assert "fake&lt;1&gt;" in html
+
+
+def test_page_without_a_brief_omits_the_panel() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "Daily brief" not in html
 
 
 def test_rendering_is_pure() -> None:
