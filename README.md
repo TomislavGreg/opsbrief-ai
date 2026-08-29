@@ -1904,7 +1904,7 @@ started only once the API and core services are stable.
 | AI-070 | Add simple server-rendered dashboard | Demo interface | Done |
 | AI-071 | Display recent events | Demo interface | Done |
 | AI-072 | Display active risks | Demo interface | Done |
-| AI-073 | Display the latest daily brief | Demo interface | Ready |
+| AI-073 | Display the latest daily brief | Demo interface | In Progress |
 | AI-074 | Display incidents and timelines | Demo interface | Backlog |
 | AI-075 | Add a public demo-data mode | Demo interface | Backlog |
 
