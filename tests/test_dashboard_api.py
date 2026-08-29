@@ -117,6 +117,25 @@ def test_dashboard_shows_a_detected_risk(client: TestClient) -> None:
     assert "No active risks across the stored events." not in body
 
 
+def test_dashboard_shows_the_daily_brief_panel(client: TestClient) -> None:
+    _post_event(client, subject="Broadcast feed dropped")
+
+    body = client.get("/dashboard").text
+
+    # The brief panel is present and names the model that phrased its summary.
+    assert "Daily brief" in body
+    assert "Phrased by fake-1" in body
+
+
+def test_dashboard_brief_reports_confidence_on_an_empty_store(client: TestClient) -> None:
+    # With no events there is no picture to describe, so the brief's confidence is
+    # `none`, and the panel shows that badge rather than omitting the brief.
+    body = client.get("/dashboard").text
+
+    assert "Daily brief" in body
+    assert "conf-none" in body
+
+
 def test_dashboard_is_in_the_openapi_schema(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
