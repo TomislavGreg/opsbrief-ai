@@ -136,6 +136,68 @@ def test_dashboard_brief_reports_confidence_on_an_empty_store(client: TestClient
     assert "conf-none" in body
 
 
+def test_dashboard_shows_no_incidents_when_there_are_none(client: TestClient) -> None:
+    body = client.get("/dashboard").text
+
+    assert "No incidents are being tracked." in body
+
+
+def test_dashboard_shows_a_tracked_incident_and_its_timeline(client: TestClient) -> None:
+    # Store two events, then declare an incident over them; the panel shows the
+    # incident with its cited events laid out oldest first.
+    _post_event(
+        client,
+        subject="Ticketing webhook failed",
+        occurred_at="2026-07-29T14:05:00Z",
+        external_id="fail-1",
+    )
+    _post_event(
+        client,
+        subject="Ticketing webhook failed again",
+        occurred_at="2026-07-29T14:25:00Z",
+        external_id="fail-2",
+    )
+    ids = [event["id"] for event in client.get("/events").json()["events"]]
+    declared = client.post(
+        "/incidents",
+        json={
+            "title": "Ticketing integration failing repeatedly",
+            "severity": "high",
+            "event_ids": ids,
+        },
+    )
+    assert declared.status_code == 201
+
+    body = client.get("/dashboard").text
+
+    assert "Incidents" in body
+    assert "Ticketing integration failing repeatedly" in body
+    assert "No incidents are being tracked." not in body
+    # The timeline reads forward in time: the earlier failure before the later one.
+    # Each event defaults to status "failed", so its timeline line ends " (failed)".
+    assert body.index("Ticketing webhook failed (failed)") < body.index("again (failed)")
+
+
+def test_dashboard_incident_reports_missing_cited_events(client: TestClient) -> None:
+    # An incident may cite an id no stored event answers to; the panel names it as
+    # a gap rather than dropping it.
+    declared = client.post(
+        "/incidents",
+        json={
+            "title": "Incident over a vanished event",
+            "severity": "medium",
+            "event_ids": ["not-a-stored-id"],
+        },
+    )
+    assert declared.status_code == 201
+
+    body = client.get("/dashboard").text
+
+    assert "Incident over a vanished event" in body
+    assert "No cited events are stored for this incident." in body
+    assert "not-a-stored-id" in body
+
+
 def test_dashboard_is_in_the_openapi_schema(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
