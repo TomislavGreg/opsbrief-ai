@@ -11,15 +11,19 @@ from opsbrief.web.schema import (
     BriefPanel,
     DashboardLink,
     DashboardView,
+    IncidentRow,
     RecentEventRow,
     RiskRow,
+    TimelineEntryRow,
 )
 
 __all__ = [
     "BriefPanel",
     "DashboardLink",
     "DashboardView",
+    "IncidentRow",
     "RecentEventRow",
     "RiskRow",
+    "TimelineEntryRow",
     "render_dashboard_page",
 ]
