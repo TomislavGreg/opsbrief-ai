@@ -1,12 +1,13 @@
 """Assembling the dashboard view from the running service and its events.
 
 The dashboard is a thin server-rendered face over the existing API. This service
-gathers what the page shows: the service identity, the current active risks in
-priority order, a bounded newest-first view of the most recent stored events, and
-the fixed set of links into the JSON endpoints the later dashboard views render
-inline. The identity comes from the settings; the risks and recent events come
-from the event store, computed and read the same way the ``GET /risks`` and
-``GET /events`` endpoints compute and read them.
+gathers what the page shows: the service identity, the latest daily brief, the
+current active risks in priority order, the tracked incidents with their timelines,
+a bounded newest-first view of the most recent stored events, and the fixed set of
+links into the remaining JSON endpoints. The identity comes from the settings; the
+brief, risks, incidents and recent events come from the stores and provider,
+generated and read the same way the ``GET /brief``, ``GET /risks``,
+``GET /incidents`` and ``GET /events`` endpoints produce them.
 """
 
 from collections.abc import Container
@@ -17,16 +18,36 @@ from opsbrief.ai import AIProvider
 from opsbrief.brief import DailyBrief
 from opsbrief.config import Settings
 from opsbrief.events import Event
+from opsbrief.incidents import (
+    Incident,
+    IncidentTimeline,
+    TimelineEntry,
+    build_incident_timeline,
+)
 from opsbrief.risks import Risk
 from opsbrief.services.brief_reporting import report_daily_brief
+from opsbrief.services.history import read_all_events
 from opsbrief.services.risk_reporting import list_risks
-from opsbrief.storage import EventStore
-from opsbrief.web import BriefPanel, DashboardLink, DashboardView, RecentEventRow, RiskRow
+from opsbrief.storage import EventStore, IncidentStore
+from opsbrief.web import (
+    BriefPanel,
+    DashboardLink,
+    DashboardView,
+    IncidentRow,
+    RecentEventRow,
+    RiskRow,
+    TimelineEntryRow,
+)
 
 #: How many recent events the dashboard panel shows. The view is bounded so the
 #: page stays small no matter how much history the store holds; the full,
 #: filterable listing remains a click away at ``GET /events``.
 DEFAULT_DASHBOARD_RECENT_EVENTS = 10
+
+#: How many tracked incidents the dashboard panel shows. Each incident carries its
+#: own timeline, so the panel is bounded more tightly than the recent-events one;
+#: the full, filterable listing remains a click away at ``GET /incidents``.
+DEFAULT_DASHBOARD_INCIDENTS = 5
 
 #: The endpoints the dashboard links into. These are the read surfaces a duty
 #: manager reaches for; the recent-events panel is now rendered inline, and the
@@ -124,13 +145,58 @@ def _risk_row(risk: Risk) -> RiskRow:
     )
 
 
+def _timeline_entry_row(entry: TimelineEntry) -> TimelineEntryRow:
+    """Reduce a timeline entry to the row the dashboard panel shows it as.
+
+    Only the fields a person reads at a glance are carried, as display strings, and
+    the free-form metadata is left out, exactly as it is from the timeline itself.
+    """
+    return TimelineEntryRow(
+        occurred_at=_format_instant(entry.occurred_at),
+        source=entry.source,
+        event_type=entry.event_type,
+        subject=entry.subject,
+        severity=entry.severity.value,
+        status=entry.status.value if entry.status is not None else "",
+    )
+
+
+def _incident_row(incident: Incident, timeline: IncidentTimeline) -> IncidentRow:
+    """Reduce a stored incident and its timeline to the row the panel shows.
+
+    The header fields come straight from the incident. The ``span`` is a display
+    string for when the timeline ran, from its first resolved event to its last,
+    empty when no cited event resolves. The timeline entries are carried in the
+    order the timeline lays them out (oldest first), and any cited id no stored
+    event answers to is named so a gap in the evidence stays visible. No model
+    takes part.
+    """
+    if timeline.started_at is not None and timeline.ended_at is not None:
+        start = _format_instant(timeline.started_at)
+        end = _format_instant(timeline.ended_at)
+        span = start if start == end else f"{start} to {end}"
+    else:
+        span = ""
+    return IncidentRow(
+        title=incident.title,
+        status=incident.status.value,
+        severity=incident.severity.value,
+        opened_at=_format_instant(incident.opened_at),
+        span=span,
+        entries=tuple(_timeline_entry_row(entry) for entry in timeline.entries),
+        missing_event_ids=tuple(timeline.missing_event_ids),
+    )
+
+
 def build_dashboard_view(
     settings: Settings,
     store: EventStore,
+    incident_store: IncidentStore,
     now: datetime,
     provider: AIProvider,
     *,
     recent_limit: int = DEFAULT_DASHBOARD_RECENT_EVENTS,
+    incident_limit: int = DEFAULT_DASHBOARD_INCIDENTS,
     excluded_fields: Container[str] = frozenset(),
 ) -> DashboardView:
     """Return the view the dashboard renders for the running service.
@@ -142,17 +208,30 @@ def build_dashboard_view(
     and a provider outage degrades to the deterministic picture rather than failing
     the page. The active-risks panel runs the canonical rule set over the whole
     history at ``now`` and ranks the result most urgent first, the same way
-    ``GET /risks`` does. The recent-events panel is the ``recent_limit`` most recently
-    occurred events, newest first, read from ``store`` the same way the ``GET /events``
-    listing reads it, alongside the total number of stored events so the panel can say
-    when it is showing a bounded view. On an empty store the risks and recent-events
-    panels are empty and the brief reports an empty picture.
+    ``GET /risks`` does. The incidents panel is the ``incident_limit`` most recently
+    opened incidents, read from ``incident_store`` the same way the ``GET /incidents``
+    listing reads them, each laid out with its timeline resolved against the whole
+    event history the same way ``build_incident_timeline`` does, alongside the total
+    number of tracked incidents so the panel can say when it is showing a bounded
+    view. The recent-events panel is the ``recent_limit`` most recently occurred
+    events, newest first, read from ``store`` the same way the ``GET /events`` listing
+    reads it, alongside the total number of stored events. On an empty store the
+    risks, incidents and recent-events panels are empty and the brief reports an empty
+    picture.
     """
     if recent_limit < 1:
         raise ValueError("recent_limit must be at least 1")
+    if incident_limit < 1:
+        raise ValueError("incident_limit must be at least 1")
 
     brief = report_daily_brief(store, now, provider, excluded_fields=excluded_fields)
     risks = list_risks(store, now).risks
+    incidents = incident_store.list_incidents(limit=incident_limit)
+    incident_total = incident_store.count()
+    events = read_all_events(store)
+    incident_rows = tuple(
+        _incident_row(incident, build_incident_timeline(incident, events)) for incident in incidents
+    )
     recent = store.list_events(limit=recent_limit)
     total = store.count()
     return DashboardView(
@@ -162,6 +241,8 @@ def build_dashboard_view(
         links=DASHBOARD_LINKS,
         brief=_brief_panel(brief),
         active_risks=tuple(_risk_row(risk) for risk in risks),
+        incidents=incident_rows,
+        total_incidents=incident_total,
         recent_events=tuple(_recent_event_row(event) for event in recent),
         total_events=total,
     )
