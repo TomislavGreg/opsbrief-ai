@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from opsbrief.ai import create_provider
-from opsbrief.brief import DailyBrief
+from opsbrief.brief import DailyBrief, NextAction
 from opsbrief.config import get_settings
 from opsbrief.risks import Risk
 from opsbrief.services import report_daily_brief
@@ -33,17 +33,27 @@ def _render_risk(risk: Risk) -> list[str]:
     ]
 
 
+def _render_action(action: NextAction) -> list[str]:
+    """Render one suggested next action as an indented block naming its evidence."""
+    return [
+        f"  [{action.severity.value}] {action.action}",
+        f"      addresses: {action.title}",
+        f"      rule: {action.rule}",
+        f"      events: {', '.join(action.event_ids)}",
+    ]
+
+
 def render_text(brief: DailyBrief) -> str:
     """Render a daily brief as a human-readable text block.
 
-    The summary, the prioritized risks, the notes on where the picture is
-    incomplete and the source event IDs behind it are all laid out plainly, each
-    risk naming the rule and events it traces to. The header records the model
-    that phrased the summary, the prompt and output versions the brief was
-    produced with, and the confidence its warnings imply, so a reader can trace it
-    and weigh it. Empty sections say ``none.`` rather
-    than vanishing, so a reader can tell "nothing to report" from a section that
-    was simply left out.
+    The summary, the prioritized risks, the suggested next actions, the notes on
+    where the picture is incomplete and the source event IDs behind it are all laid
+    out plainly, each risk and each action naming the rule and events it traces to.
+    The header records the model that phrased the summary, the prompt and output
+    versions the brief was produced with, and the confidence its warnings imply, so
+    a reader can trace it and weigh it. Empty sections say ``none.`` rather than
+    vanishing, so a reader can tell "nothing to report" from a section that was
+    simply left out.
     """
     lines: list[str] = [
         "Daily operations brief",
@@ -62,6 +72,14 @@ def render_text(brief: DailyBrief) -> str:
             lines.extend(_render_risk(risk))
     else:
         lines.append("Risks (most urgent first): none.")
+    lines.append("")
+
+    if brief.next_actions:
+        lines.append("Next actions (most urgent first):")
+        for action in brief.next_actions:
+            lines.extend(_render_action(action))
+    else:
+        lines.append("Next actions (most urgent first): none.")
     lines.append("")
 
     if brief.notes:
