@@ -80,6 +80,34 @@ def test_context_source_event_ids_are_distinct() -> None:
     assert context.source_event_ids == ["e1", "e2"]
 
 
+def test_context_suggests_one_next_action_per_risk_in_order() -> None:
+    context = BriefContext(
+        generated_at=NOW,
+        event_count=2,
+        risks=[
+            make_risk("repeated_integration_failure", ["e1"], RiskSeverity.CRITICAL),
+            make_risk("overdue_work", ["e2"], RiskSeverity.HIGH),
+        ],
+        recent_events=[make_digest("e1"), make_digest("e2")],
+    )
+
+    actions = context.next_actions
+    assert [a.rule for a in actions] == ["repeated_integration_failure", "overdue_work"]
+    assert actions[0].event_ids == ["e1"]
+    assert actions[1].severity is RiskSeverity.HIGH
+
+
+def test_context_with_no_risks_suggests_no_actions() -> None:
+    context = BriefContext(
+        generated_at=NOW,
+        event_count=1,
+        risks=[],
+        recent_events=[make_digest("e1")],
+    )
+
+    assert context.next_actions == []
+
+
 def test_context_with_no_events_is_valid_and_cites_nothing() -> None:
     context = BriefContext(
         generated_at=NOW,
