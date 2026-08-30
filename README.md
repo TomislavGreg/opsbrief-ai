@@ -239,6 +239,14 @@ produced it.
   empty state rather than a table. Every dynamic value is escaped as it is rendered.
   It is the growing inline view of the demo interface: later views render the other
   panels inline in the same way.
+- A public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a
+  fresh (empty) store on startup with the synthetic match-day fixture and the worked
+  quality-control incident declared over it, so a public demo shows a populated
+  dashboard (recent events, active risks, a daily brief and a tracked incident with a
+  timeline) without anyone posting events first. Seeding is guarded and idempotent: it
+  runs only when the event store holds no events, so it never mixes synthetic data into
+  a store that already carries real events and never seeds twice across restarts. The
+  seeded data is fictional and carries no private, customer or personal data.
 - Environment-backed configuration via `OPSBRIEF_`-prefixed variables.
 - Test suite and linting wired into GitHub Actions.
 - Container image and Compose service for running the API without a local
@@ -1832,6 +1840,34 @@ label, every risk, incident, timeline and event field) is escaped as it is place
 neither an operator-supplied setting nor a producer-supplied field can inject markup, and
 the rendering is a pure function of the view.
 
+### Demo data mode
+
+A fresh deployment starts with an empty store, so the dashboard and the read
+endpoints have nothing to show until events are posted. For a public demo that is
+awkward: the point is to show what OpsBrief AI does, not an empty page. Demo-data
+mode fills that gap.
+
+```bash
+OPSBRIEF_DEMO_DATA=true uvicorn opsbrief.main:app
+```
+
+When the setting is true, the service seeds the store on startup with the
+sports-operations match-day fixture (short stewarding, an overdue pitch inspection, a
+blocked scoreboard task, a broadcast feed failing repeatedly, a rejected goal-line
+technology check and a crowd-density alert) and the worked quality-control incident
+declared over the rejected check. That is enough for every dashboard panel to have
+something real to render: recent events, the risks the rules raise over them, a daily
+brief phrased from that picture, and a tracked incident with a timeline. The seeded
+events and incident are the same deterministic fixtures the samples package exposes,
+so a demo built on them is reproducible.
+
+Seeding is deliberately conservative. It runs only when the event store holds no
+events, so it never adds synthetic data to a store that already carries real events,
+and a restart of an already-seeded deployment does not seed a second time. The setting
+defaults to false, so a real deployment is never seeded unless it opts in. The data is
+fictional and holds no private, customer or personal data, in line with the project's
+data policy.
+
 ## Development Commands
 
 ```bash
@@ -1944,7 +1980,7 @@ started only once the API and core services are stable.
 | AI-072 | Display active risks | Demo interface | Done |
 | AI-073 | Display the latest daily brief | Demo interface | Done |
 | AI-074 | Display incidents and timelines | Demo interface | Done |
-| AI-075 | Add a public demo-data mode | Demo interface | In Progress |
+| AI-075 | Add a public demo-data mode | Demo interface | Done |
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
@@ -1981,15 +2017,22 @@ contract the platform integrates against (AI-063), and
 [`docs/deployment.md`](docs/deployment.md) now records how to run the service in
 a real environment (AI-066).
 
-Phase 7 (Demo interface) is under way: a server-rendered dashboard over the
-existing API, started now that the API and core services are stable. The dashboard
+Phase 7 (Demo interface) is complete: a server-rendered dashboard over the
+existing API, started once the API and core services were stable. The dashboard
 shell is in place at `GET /dashboard` (AI-070), a small standard-library HTML page
-showing the service identity and links into the read endpoints, and it now renders
-the latest daily brief (AI-073), the current active risks (AI-072), the tracked
-incidents with their timelines (AI-074) and the most recent stored events (AI-071)
-inline as panels. AI-075 (add a public demo-data mode), the last Phase 7 step, is Ready
-as the following step. When a ticket's dependencies are complete, promote it to Ready so
-the next change has a clear starting point.
+showing the service identity and links into the read endpoints, and it renders the
+latest daily brief (AI-073), the current active risks (AI-072), the tracked incidents
+with their timelines (AI-074) and the most recent stored events (AI-071) inline as
+panels. A public demo-data mode (AI-075) seeds a fresh store on startup with the
+synthetic match-day fixture and the worked quality-control incident, so a public demo
+shows a populated dashboard without anyone posting events first, guarded so it never
+touches a store that already holds real data.
+
+Every roadmap phase now has its planned tickets Done, apart from AI-056 (automate
+dependency scanning in CI), which stays Blocked on a workflow change a maintainer
+applies. Further work is added as concrete tickets when a bug, a missing test, a
+reliability or security gap, or a maintainability improvement calls for one, rather
+than by padding the roadmap with speculative features.
 
 ### Maintaining the CI workflow
 
@@ -2000,6 +2043,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
 - 2026-08-29 - Added an incidents panel to the dashboard: `GET /dashboard` now reads the most recently opened tracked incidents (the same way `GET /incidents` does) and renders each inline with its status and severity as badges and its timeline, the cited events laid out oldest first (the same way `build_incident_timeline` orders them) resolved against the whole event history at request time. A cited id no stored event answers to is named as a gap rather than dropped, no tracked incidents shows an empty state, and every field is escaped as it is placed.
 - 2026-08-29 - Added a daily-brief panel to the dashboard: `GET /dashboard` now generates the current brief across the whole event history at request time (the same way `GET /brief` does) and renders it inline above the active-risks panel, showing the model-phrased summary with the model that phrased it, the derived confidence level as a badge and the notes on where the picture is incomplete. Only the summary comes from the model and it is escaped as it is placed; when the provider returns no summary the panel says so plainly rather than blanking the page.
 - 2026-08-28 - Added an active-risks panel to the dashboard: `GET /dashboard` now runs the canonical risk rules over the whole event history at request time (the same way `GET /risks` does) and renders the prioritized result inline above the recent-events table, showing each risk's severity as a badge and naming the rule and source events behind it. No active risks shows an all-clear empty state, and every risk field is escaped as it is placed.
@@ -2013,7 +2057,6 @@ it is not picked up and left half-finished.
 - 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-23 - Added a sports-operations match-day sample fixture alongside the general venue set: `load_sample_match_events` reads and validates a synthetic football match day (short stewarding, an unfilled medic post, an overdue pitch inspection, a blocked scoreboard task, a broadcast feed failing repeatedly and a crowd-density alert), shaped so the deterministic risk rules recognise it, giving Game Center readiness work realistic match-operations material.
 - 2026-08-23 - Added a security policy and dependency scanning: `SECURITY.md` records how to report a vulnerability, which versions are supported and the design choices that keep the service safe, and `pip-audit` ships in the `dev` extra so the installed dependencies can be scanned for known advisories with one command. Automating the scan in CI is tracked separately as it needs a workflow change a maintainer applies.
-- 2026-08-22 - Added structured generation audit records: a daily brief or an incident summary can be projected into a compact, uniform `GenerationAudit` naming what the output was produced from (its source and missing event ids) and by (its model and prompt and output versions), alongside the confidence and warning codes it reported, derived from the output and holding no model involvement of its own.
 
 ## Future Game Center Integration
 
