@@ -18,6 +18,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from opsbrief.brief.actions import NextAction, suggest_next_actions
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk
@@ -164,6 +165,20 @@ class BriefContext(BaseModel):
         same order as ``references`` so the two stay in step.
         """
         return collect_source_event_ids(self.risks, self.recent_events)
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="One suggested next action per risk, in priority order.",
+    )
+    @property
+    def next_actions(self) -> list[NextAction]:
+        """Return one suggested next action per risk, in priority order.
+
+        It is derived from ``risks`` rather than stored, so it can never disagree
+        with the risks it addresses, and no model takes part: each action is the
+        canonical recommendation for the rule behind its risk, carrying the same
+        source events.
+        """
+        return suggest_next_actions(self.risks)
 
 
 class DailyBrief(BaseModel):
