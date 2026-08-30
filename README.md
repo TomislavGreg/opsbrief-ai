@@ -117,6 +117,13 @@ produced it.
   whole stored event history and returns the current daily brief: a model-phrased
   summary alongside the prioritized risks, incompleteness notes and source event
   IDs the picture traces back to.
+- Suggested next actions on every daily brief: alongside the risks it reports, a
+  brief carries one deterministic `next_action` per risk, in the same priority
+  order, each the canonical recommended step for the rule that raised the risk and
+  carrying that risk's title, severity and source event IDs. No model decides them,
+  so an action traces back to the same evidence as the risk it addresses, and a
+  rule with no canonical action yet falls back to a generic review step rather than
+  being dropped. They surface on `GET /brief` and in the `opsbrief` text output.
 - An `opsbrief` command-line entry point that generates the current daily brief
   over the configured event store and prints it as a readable text block or as
   the brief's exact JSON, so a brief can be produced without running the server.
@@ -596,16 +603,17 @@ curl http://127.0.0.1:8000/brief
 ```
 
 The service answers `200 OK` with a brief for the moment of the request: a
-model-phrased `summary` alongside the deterministic picture behind it — the
-prioritized `risks`, the `notes` on where the picture is incomplete, and the
-`source_event_ids` every claim traces back to:
+model-phrased `summary` alongside the deterministic picture behind it: the
+prioritized `risks`, the suggested `next_actions` that address them, the `notes`
+on where the picture is incomplete, and the `source_event_ids` every claim traces
+back to:
 
 ```json
 {
   "generated_at": "2026-07-29T18:00:00Z",
   "summary": "One integration keeps failing and a safety inspection is overdue; deal with the ticketing failures first.",
   "model": "fake-1",
-  "output_version": "daily-brief/3",
+  "output_version": "daily-brief/4",
   "prompt_version": "brief-prompt/1",
   "confidence": "high",
   "risks": [
@@ -637,6 +645,22 @@ prioritized `risks`, the `notes` on where the picture is incomplete, and the
       "occurred_at": "2026-07-29T14:05:00Z",
       "severity": "high",
       "status": "failed"
+    }
+  ],
+  "next_actions": [
+    {
+      "action": "Investigate the failing integration and restore it before dependent work is affected.",
+      "rule": "repeated_integration_failure",
+      "title": "Integration ticketing has failed 5 times",
+      "severity": "critical",
+      "event_ids": ["e17", "e18", "e19", "e20", "e21"]
+    },
+    {
+      "action": "Escalate the overdue work and agree a new completion time with its owner.",
+      "rule": "overdue_work",
+      "title": "Safety inspection for North Stand is overdue",
+      "severity": "high",
+      "event_ids": ["e04"]
     }
   ]
 }
@@ -1092,9 +1116,10 @@ stored, so it can never disagree with the gaps the output reports:
 
 An all-clear picture stays `high`: `no_risks` is good news, not a gap, so it does
 not lower confidence. Both the warnings and the level are deterministic and hold
-no model involvement, like the evidence they describe. Because the generated
-output gained these fields, `GET /brief` reports `output_version` `daily-brief/3`
-and an incident summary reports `incident-summary/3`.
+no model involvement, like the evidence they describe. When these fields were
+added a daily brief reported `output_version` `daily-brief/3` and an incident
+summary `incident-summary/3`; a daily brief has since gained suggested next
+actions and reports `daily-brief/4` (see [Suggested Next Actions](#suggested-next-actions)).
 
 ## Generation Audit Records
 
@@ -1512,6 +1537,7 @@ brief.warnings  # the same gaps as structured, machine-readable records
 brief.confidence  # how much of the picture stands, derived from the warnings
 brief.source_event_ids  # every event id the brief traces back to
 brief.references  # each of those ids resolved to what the event was
+brief.next_actions  # one suggested action per risk, in priority order
 ```
 
 The division of labour is the whole point. The model contributes only the
@@ -1541,6 +1567,33 @@ The `GET /brief` endpoint surfaces exactly this over HTTP: it assembles the
 context over the whole stored event history at the moment of the request, phrases
 it with the configured provider and returns the resulting `DailyBrief`. An
 example is shown under [API Examples](#api-examples).
+
+### Suggested next actions
+
+A brief states the risks; suggested next actions go one step further and name, for
+each risk, what to do about it. They are deterministic and rule-based, exactly like
+the risks: no language model decides them. Each risk maps to a canonical
+recommended action by the rule that raised it, and the action carries the same
+title, severity and source event IDs as the risk, so a suggestion traces back to
+the same evidence a reader would check.
+
+```python
+from opsbrief.brief import suggest_next_actions
+
+actions = suggest_next_actions(brief.risks)  # or read brief.next_actions directly
+actions[0].action  # the recommended step for the most urgent risk
+actions[0].rule  # the rule behind the risk it addresses
+actions[0].event_ids  # the same source events the risk cites
+```
+
+There is exactly one action per risk, in the risks' priority order, so the most
+pressing action comes first and an all-clear brief with no risks suggests nothing.
+A rule with no canonical action yet falls back to a generic review step rather than
+being dropped, so a newly added rule always yields a usable suggestion. The brief
+carries the actions as `next_actions`, derived from its risks so the two can never
+disagree; because the output structure gained the field, `GET /brief` reports
+`output_version` `daily-brief/4`. The `opsbrief` command shows the same actions in
+its text output alongside the risks they address.
 
 The same generation step is available on the command line, so a brief can be
 produced without running the server:
@@ -1953,7 +2006,7 @@ started only once the API and core services are stable.
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
 | AI-037 | Degrade the daily brief when the provider fails | AI daily briefs | Done |
-| AI-038 | Add suggested next actions to the daily brief | AI daily briefs | In Progress |
+| AI-038 | Add suggested next actions to the daily brief | AI daily briefs | Done |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
@@ -2029,6 +2082,12 @@ synthetic match-day fixture and the worked quality-control incident, so a public
 shows a populated dashboard without anyone posting events first, guarded so it never
 touches a store that already holds real data.
 
+Phase 3 (AI daily briefs) gained the suggested next actions the brief has always
+described but never carried (AI-038): every daily brief now names, for each risk, a
+deterministic recommended action tracing back to the same events, so a reader sees
+not just what the risks are but what to do about them. See
+[Suggested Next Actions](#suggested-next-actions).
+
 Every roadmap phase now has its planned tickets Done, apart from AI-056 (automate
 dependency scanning in CI), which stays Blocked on a workflow change a maintainer
 applies. Further work is added as concrete tickets when a bug, a missing test, a
@@ -2044,6 +2103,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
 - 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
 - 2026-08-29 - Added an incidents panel to the dashboard: `GET /dashboard` now reads the most recently opened tracked incidents (the same way `GET /incidents` does) and renders each inline with its status and severity as badges and its timeline, the cited events laid out oldest first (the same way `build_incident_timeline` orders them) resolved against the whole event history at request time. A cited id no stored event answers to is named as a gap rather than dropped, no tracked incidents shows an empty state, and every field is escaped as it is placed.
 - 2026-08-29 - Added a daily-brief panel to the dashboard: `GET /dashboard` now generates the current brief across the whole event history at request time (the same way `GET /brief` does) and renders it inline above the active-risks panel, showing the model-phrased summary with the model that phrased it, the derived confidence level as a badge and the notes on where the picture is incomplete. Only the summary comes from the model and it is escaped as it is placed; when the provider returns no summary the panel says so plainly rather than blanking the page.
@@ -2057,7 +2117,6 @@ it is not picked up and left half-finished.
 - 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-23 - Added a sports-operations match-day sample fixture alongside the general venue set: `load_sample_match_events` reads and validates a synthetic football match day (short stewarding, an unfilled medic post, an overdue pitch inspection, a blocked scoreboard task, a broadcast feed failing repeatedly and a crowd-density alert), shaped so the deterministic risk rules recognise it, giving Game Center readiness work realistic match-operations material.
-- 2026-08-23 - Added a security policy and dependency scanning: `SECURITY.md` records how to report a vulnerability, which versions are supported and the design choices that keep the service safe, and `pip-audit` ships in the `dev` extra so the installed dependencies can be scanned for known advisories with one command. Automating the scan in CI is tracked separately as it needs a workflow change a maintainer applies.
 
 ## Future Game Center Integration
 
