@@ -34,7 +34,7 @@ MAX_SUMMARY_LENGTH = 1_000
 #: one and a stored brief stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`DailyBrief` change in a way a consumer would
 #: need to notice.
-BRIEF_OUTPUT_VERSION = "daily-brief/3"
+BRIEF_OUTPUT_VERSION = "daily-brief/4"
 
 #: Version of the prompt a brief's summary was produced with — the instructions
 #: and the context rendering in :mod:`opsbrief.brief.generate`. Every generated
@@ -197,7 +197,11 @@ class DailyBrief(BaseModel):
     into a single level a reader can weigh the brief by. Alongside the flat
     ``source_event_ids``, ``references`` resolves each of those ids to what the
     event was, in the same order, so the brief is self-describing and a reader need
-    not look every cited event up separately. ``model`` names the model that
+    not look every cited event up separately. ``next_actions`` names one suggested
+    action per risk, in priority order, each the deterministic recommendation for
+    the rule behind its risk and carrying the same source events, so a reader sees
+    not only what the risks are but what to do about them, with no model deciding
+    the advice. ``model`` names the model that
     produced the summary, so a generated statement traces to its model just as a
     risk traces to its rule.
     ``output_version`` names the shape the brief was
@@ -250,6 +254,10 @@ class DailyBrief(BaseModel):
     references: list[SourceReference] = Field(
         default_factory=list,
         description="Each source event id resolved to what the event was, in the same order.",
+    )
+    next_actions: list[NextAction] = Field(
+        default_factory=list,
+        description="One suggested next action per risk, carried over in priority order.",
     )
 
     @computed_field(  # type: ignore[prop-decorator]
