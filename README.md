@@ -1953,6 +1953,7 @@ started only once the API and core services are stable.
 | AI-035 | Add command-line brief generation | AI daily briefs | Done |
 | AI-036 | Add prompt and output version tracking | AI daily briefs | Done |
 | AI-037 | Degrade the daily brief when the provider fails | AI daily briefs | Done |
+| AI-038 | Add suggested next actions to the daily brief | AI daily briefs | In Progress |
 | AI-040 | Add incident model and status lifecycle | Incident intelligence | Done |
 | AI-041 | Link operational events to incidents | Incident intelligence | Done |
 | AI-042 | Generate incident timelines | Incident intelligence | Done |
