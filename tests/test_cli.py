@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from opsbrief.brief import DailyBrief
+from opsbrief.brief import DailyBrief, NextAction
 from opsbrief.cli import build_parser, render_json, render_text, run
 from opsbrief.config import get_settings
 from opsbrief.events import Event, EventInput
@@ -46,6 +46,31 @@ def test_text_shows_the_summary_model_and_risks() -> None:
     assert "rule: repeated_integration_failure" in text
     assert "events: e17, e18, e19" in text
     assert "Source events: e17, e18, e19" in text
+
+
+def test_text_shows_suggested_next_actions() -> None:
+    action = NextAction(
+        action=(
+            "Investigate the failing integration and restore it before dependent work is affected."
+        ),
+        rule="repeated_integration_failure",
+        title="Integration ticketing has failed 5 times",
+        severity=RiskSeverity.CRITICAL,
+        event_ids=["e17", "e18", "e19"],
+    )
+
+    text = render_text(make_brief(next_actions=[action]))
+
+    assert "Next actions (most urgent first):" in text
+    assert "[critical] Investigate the failing integration" in text
+    assert "addresses: Integration ticketing has failed 5 times" in text
+    assert "rule: repeated_integration_failure" in text
+
+
+def test_text_marks_no_next_actions_rather_than_dropping_the_section() -> None:
+    text = render_text(make_brief(next_actions=[]))
+
+    assert "Next actions (most urgent first): none." in text
 
 
 def test_text_records_the_prompt_and_output_versions() -> None:
