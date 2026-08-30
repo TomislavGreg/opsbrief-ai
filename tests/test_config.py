@@ -45,6 +45,14 @@ def test_an_unknown_excluded_field_is_refused() -> None:
         settings.excluded_ai_context_fields()
 
 
+def test_demo_data_is_off_by_default() -> None:
+    assert Settings().demo_data is False
+
+
+def test_demo_data_can_be_enabled() -> None:
+    assert Settings(demo_data="true").demo_data is True
+
+
 def test_the_webhook_is_disabled_without_a_secret() -> None:
     settings = Settings(webhook_secret="")
 

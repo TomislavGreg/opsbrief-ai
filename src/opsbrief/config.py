@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     log_level: str = "info"
     database_url: str = "sqlite:///./opsbrief.db"
     ai_provider: str = "fake"
+    demo_data: bool = False
     redact_metadata_keys: str = ""
     ai_context_excluded_fields: str = ""
     webhook_secret: str = ""
