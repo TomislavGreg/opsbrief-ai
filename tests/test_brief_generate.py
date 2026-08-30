@@ -96,6 +96,16 @@ def test_references_are_carried_from_the_context_onto_the_brief() -> None:
     assert [reference.event_id for reference in brief.references] == brief.source_event_ids
 
 
+def test_next_actions_are_carried_from_the_context_onto_the_brief() -> None:
+    context = make_context()
+    provider = FakeAIProvider(responses=["A summary."])
+
+    brief = generate_brief(context, provider)
+
+    assert brief.next_actions == context.next_actions
+    assert [action.rule for action in brief.next_actions] == [risk.rule for risk in brief.risks]
+
+
 def test_generated_brief_records_the_prompt_and_output_versions() -> None:
     provider = FakeAIProvider(responses=["A summary."])
 

@@ -184,4 +184,5 @@ def generate_brief(
         warnings=warnings,
         source_event_ids=context.source_event_ids,
         references=context.references,
+        next_actions=context.next_actions,
     )

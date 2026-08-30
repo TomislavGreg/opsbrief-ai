@@ -13,7 +13,7 @@ def make_audit(**overrides: object) -> GenerationAudit:
         "kind": GenerationKind.DAILY_BRIEF,
         "model": "fake-1",
         "prompt_version": "brief-prompt/1",
-        "output_version": "daily-brief/3",
+        "output_version": "daily-brief/4",
         "source_event_ids": ["e1", "e2"],
         "confidence": Confidence.HIGH,
     }
@@ -31,7 +31,7 @@ def test_a_record_carries_what_produced_the_output() -> None:
     assert audit.kind is GenerationKind.DAILY_BRIEF
     assert audit.model == "fake-1"
     assert audit.prompt_version == "brief-prompt/1"
-    assert audit.output_version == "daily-brief/3"
+    assert audit.output_version == "daily-brief/4"
     assert audit.source_event_ids == ["e17", "e18"]
     assert audit.warning_codes == [WarningCode.EVENTS_OMITTED]
     assert audit.confidence is Confidence.MEDIUM
