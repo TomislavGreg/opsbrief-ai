@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from opsbrief import __version__
 from opsbrief.api import brief, dashboard, events, health, incidents, risks, webhooks
 from opsbrief.config import get_settings
+from opsbrief.samples.seed import seed_demo_data
 from opsbrief.storage import EventStore, IncidentStore
 
 
@@ -17,13 +18,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     The stores are opened here rather than while the application object is built
     so that importing this module does not touch the database. Both address the
-    same configured database and are closed again when the application stops.
+    same configured database and are closed again when the application stops. When
+    demo-data mode is on, an empty store is seeded with synthetic data once the
+    stores are open, so a public demo starts with a populated dashboard.
     """
-    database_url = get_settings().database_url
-    event_store = EventStore.open(database_url)
-    incident_store = IncidentStore.open(database_url)
+    settings = get_settings()
+    event_store = EventStore.open(settings.database_url)
+    incident_store = IncidentStore.open(settings.database_url)
     app.state.event_store = event_store
     app.state.incident_store = incident_store
+    if settings.demo_data:
+        seed_demo_data(event_store, incident_store)
     try:
         yield
     finally:
