@@ -10,11 +10,14 @@ from opsbrief.services.incident_reporting import (
 )
 from opsbrief.services.incident_summary_reporting import report_incident_summary
 from opsbrief.services.ingestion import record_event, record_events
+from opsbrief.services.readiness import Readiness, check_readiness
 from opsbrief.services.retrieval import get_event, list_events
 from opsbrief.services.risk_reporting import list_risks
 
 __all__ = [
+    "Readiness",
     "build_dashboard_view",
+    "check_readiness",
     "declare_incident",
     "get_event",
     "get_incident",
