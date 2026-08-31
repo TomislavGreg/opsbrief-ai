@@ -192,17 +192,30 @@ worth the weight (see the design constraints in the README's Architecture sectio
 ## Health checks
 
 `GET /health` answers `200` with the service name, version and environment once the
-application is serving. It touches no external state, so it is a liveness and
-readiness probe in one: a `200` means the process is up and answering.
+application is serving. It touches no external state, so it is a pure liveness
+probe: a `200` means the process is up and answering.
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-The container image already wires this into a Docker `HEALTHCHECK`. For an
-orchestrator, point both the liveness and readiness probes at `/health`. There is
-no separate startup dependency to wait on: the database is opened when the
-application starts, so a `200` from `/health` means the store is open too.
+`GET /health/ready` is the readiness probe. It goes one step further and checks the
+dependency the service actually needs, the SQLite database, by probing the event and
+incident stores with a cheap counting query. It answers `200` when both are reachable
+and `503` (with a body naming the degraded dependency) when one is not, so an
+orchestrator can keep an instance that is alive but cannot reach its database out of
+rotation rather than routing traffic to it.
+
+```bash
+curl http://127.0.0.1:8000/health/ready
+```
+
+The container image wires the liveness check into a Docker `HEALTHCHECK` against
+`/health`. For an orchestrator, point the liveness probe at `/health` and the
+readiness probe at `/health/ready`. The database is opened when the application
+starts, so in the common single-file deployment a serving process is usually ready
+too; the readiness probe still earns its place when the database lives on a mounted
+volume that can become unavailable while the process keeps running.
 
 ## Running behind a reverse proxy
 
