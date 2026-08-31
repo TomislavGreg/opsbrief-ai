@@ -173,6 +173,15 @@ produced it.
   incidents most recently opened first, filtered by status and paginated; and
   `GET /incidents/{incident_id}` returns a single stored incident, or 404 when no
   incident carries that identifier.
+- An incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a
+  tracked incident's cited events against the whole event history into a timeline and
+  returns the current incident summary, a model-phrased summary alongside the
+  deterministic status, severity, span, source event IDs, references and any cited id
+  that no longer resolves. Only the summary comes from a model and it is constrained as
+  untrusted output, so a provider outage degrades the summary rather than failing the
+  request; a missing incident is answered with 404. It reuses the same
+  `generate_incident_summary` path a `GET /brief` reuses for the daily brief, honouring
+  `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`.
 - Incident resolution notes: an incident can be resolved with an optional
   operator note explaining how it was put right, over
   `POST /incidents/{incident_id}/resolution`. The note is kept with the incident
@@ -792,6 +801,47 @@ stored incident is answered with `404`, and an incident that cannot move to
 `resolved` (one already resolved or closed) is answered with `409` rather than
 silently reapplied, so a caller can tell a missing incident from one already past
 resolving.
+
+Summarise a tracked incident:
+
+```bash
+curl http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7/summary
+```
+
+The service answers `200 OK` with the incident summarised: a model-phrased `summary`
+alongside the deterministic picture behind it, the `status`, `severity`, the span its
+cited events ran over, the `source_event_ids` in cited order, the `references` those
+resolve to, any `missing_event_ids` no stored event answers to, and the `confidence`
+and `warnings` a reader weighs it by:
+
+```json
+{
+  "incident_id": "b3f1c2d4e5a6470897a1b2c3d4e5f6a7",
+  "title": "Ticketing integration failing repeatedly",
+  "status": "resolved",
+  "severity": "high",
+  "resolution_note": "Restarted the ticketing sync and confirmed recovery.",
+  "summary": "Ticketing failed repeatedly through the afternoon and was restarted; it is resolved.",
+  "model": "fake-1",
+  "output_version": "incident-summary/3",
+  "prompt_version": "incident-summary-prompt/1",
+  "confidence": "high",
+  "started_at": "2026-07-29T14:05:00Z",
+  "ended_at": "2026-07-29T14:40:00Z",
+  "source_event_ids": ["e17", "e18", "e19"],
+  "references": [
+    { "event_id": "e17", "resolved": true, "subject": "Ticketing webhook failed", "...": "..." }
+  ],
+  "missing_event_ids": [],
+  "notes": [],
+  "warnings": []
+}
+```
+
+Only the `summary` comes from a language model, and it is treated as untrusted, so a
+provider outage returns the deterministic picture with an empty summary and a note
+rather than an error, exactly as `GET /brief` does. An identifier that matches no
+stored incident is answered with `404`.
 
 Further endpoints are documented here as they are built.
 
@@ -1815,9 +1865,13 @@ one stored incident, or 404 when no incident carries that identifier.
 `POST /incidents/{incident_id}/resolution` moves a tracked incident to `resolved`
 and records an optional note explaining how it was put right, saving the change;
 it answers 404 when no incident carries the identifier and 409 when the incident
-cannot move to `resolved` from its current state. The router stays thin: it
-validates the request and hands the store to the service, which declares, reads
-or resolves. The transition and note rules stay in the incident model, not the
+cannot move to `resolved` from its current state.
+`GET /incidents/{incident_id}/summary` returns the incident summarised, phrasing
+the deterministic picture with the configured provider the same way `GET /brief`
+phrases the daily brief; it answers 404 when no incident carries the identifier. The
+router stays thin: it validates the request and hands the store to the service, which
+declares, reads, resolves or (reading the whole event history and the provider)
+summarises. The transition and note rules stay in the incident model, not the
 router. The application opens the incident store alongside the event store when
 it starts. Examples are shown under [API Examples](#api-examples).
 
@@ -2015,6 +2069,7 @@ started only once the API and core services are stable.
 | AI-045 | Add incident-resolution notes | Incident intelligence | Done |
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
+| AI-080 | Add incident-summary API endpoint | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2092,7 +2147,11 @@ Every roadmap phase now has its planned tickets Done, apart from AI-056 (automat
 dependency scanning in CI), which stays Blocked on a workflow change a maintainer
 applies. Further work is added as concrete tickets when a bug, a missing test, a
 reliability or security gap, or a maintainability improvement calls for one, rather
-than by padding the roadmap with speculative features.
+than by padding the roadmap with speculative features. AI-080 is one such follow-up:
+the AI incident summary the service has generated since AI-043 is now readable over
+HTTP through `GET /incidents/{incident_id}/summary`, so the operations platform can
+fetch an incident summary the same way it fetches a daily brief rather than only
+seeing one on the dashboard.
 
 ### Maintaining the CI workflow
 
@@ -2103,6 +2162,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
 - 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
 - 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
 - 2026-08-29 - Added an incidents panel to the dashboard: `GET /dashboard` now reads the most recently opened tracked incidents (the same way `GET /incidents` does) and renders each inline with its status and severity as badges and its timeline, the cited events laid out oldest first (the same way `build_incident_timeline` orders them) resolved against the whole event history at request time. A cited id no stored event answers to is named as a gap rather than dropped, no tracked incidents shows an empty state, and every field is escaped as it is placed.
@@ -2116,7 +2176,6 @@ it is not picked up and left half-finished.
 - 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
 - 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
 - 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
-- 2026-08-23 - Added a sports-operations match-day sample fixture alongside the general venue set: `load_sample_match_events` reads and validates a synthetic football match day (short stewarding, an unfilled medic post, an overdue pitch inspection, a blocked scoreboard task, a broadcast feed failing repeatedly and a crowd-density alert), shaped so the deterministic risk rules recognise it, giving Game Center readiness work realistic match-operations material.
 
 ## Future Game Center Integration
 
