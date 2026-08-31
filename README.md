@@ -32,8 +32,11 @@ produced it.
 
 ## Current Capabilities
 
-- FastAPI application with a `/health` endpoint reporting service name,
-  version and environment.
+- FastAPI application with a `/health` liveness endpoint reporting service name,
+  version and environment, and a `/health/ready` readiness endpoint that probes the
+  event and incident stores and answers 503 when one cannot be reached, so an
+  orchestrator can gate traffic on the stores being reachable rather than only on
+  the process being alive.
 - A validated operational event contract: `EventInput` for submissions and
   `Event` for stored events, with UTC-normalised timestamps and bounded
   metadata.
@@ -386,6 +389,32 @@ curl http://127.0.0.1:8000/health
   "environment": "development"
 }
 ```
+
+`GET /health` is a liveness check: it reports that the process is up without
+touching the database. To check that the service can actually serve, which depends
+on its stores being reachable, use the readiness endpoint:
+
+```bash
+curl http://127.0.0.1:8000/health/ready
+```
+
+It probes the event and incident stores and answers `200 OK` when both are
+reachable, or `503 Service Unavailable` with the same body when one is not, naming
+the dependency that is degraded:
+
+```json
+{
+  "ready": true,
+  "checks": [
+    { "name": "event_store", "ready": true, "detail": null },
+    { "name": "incident_store", "ready": true, "detail": null }
+  ]
+}
+```
+
+An orchestrator gates traffic on the readiness endpoint and restarts on the
+liveness one, so a service that is alive but cannot reach its database is kept out
+of rotation rather than served broken requests.
 
 Submit an operational event:
 
@@ -2039,6 +2068,7 @@ started only once the API and core services are stable.
 | AI-004 | Define the operational event schema | Foundation | Done |
 | AI-005 | Add SQLite event persistence | Foundation | Done |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
+| AI-081 | Add a readiness health check | Foundation | Done |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Done |
 | AI-011 | Add batch-event ingestion | Event ingestion | Done |
 | AI-012 | Add event filtering and pagination | Event ingestion | Done |
@@ -2151,7 +2181,10 @@ than by padding the roadmap with speculative features. AI-080 is one such follow
 the AI incident summary the service has generated since AI-043 is now readable over
 HTTP through `GET /incidents/{incident_id}/summary`, so the operations platform can
 fetch an incident summary the same way it fetches a daily brief rather than only
-seeing one on the dashboard.
+seeing one on the dashboard. AI-081 is another: `GET /health/ready` gives a
+deployment a readiness probe distinct from the `GET /health` liveness check, so an
+orchestrator can keep a service that cannot reach its database out of rotation
+rather than routing traffic to it.
 
 ### Maintaining the CI workflow
 
@@ -2162,6 +2195,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
 - 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
 - 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
 - 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
@@ -2175,7 +2209,6 @@ it is not picked up and left half-finished.
 - 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
 - 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
 - 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
-- 2026-08-24 - Added a worked match-operations daily brief example: `load_sample_match_stored_events` turns the match-day fixture into stored events with stable ids, and `build_sample_match_brief` runs the whole risk-to-brief pipeline over them at a fixed match-day instant, surfacing the overdue pitch inspection, the blocked scoreboard calibration and the repeatedly failing broadcast feed and phrasing them with a scripted fake provider, so the pipeline can be shown over realistic match material without a database, a server or a real model.
 
 ## Future Game Center Integration
 
