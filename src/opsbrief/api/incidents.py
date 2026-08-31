@@ -10,19 +10,26 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from opsbrief.api.dependencies import IncidentStoreDependency
+from opsbrief.api.dependencies import (
+    AIProviderDependency,
+    EventStoreDependency,
+    ExcludedAIContextFieldsDependency,
+    IncidentStoreDependency,
+)
 from opsbrief.incidents import (
     Incident,
     IncidentDeclaration,
     IncidentPage,
     IncidentQuery,
     IncidentResolution,
+    IncidentSummary,
     InvalidIncidentTransition,
 )
 from opsbrief.services import (
     declare_incident,
     get_incident,
     list_incidents,
+    report_incident_summary,
     resolve_incident,
 )
 
@@ -72,6 +79,50 @@ def read_incident(
             detail=f"no incident is stored under id {incident_id!r}",
         )
     return incident
+
+
+@router.get(
+    "/{incident_id}/summary",
+    response_model=IncidentSummary,
+    summary="Summarise a tracked incident",
+    response_description="The incident summarised: a model summary over the deterministic picture.",
+    responses={404: {"description": "No incident is stored under the requested identifier."}},
+)
+def read_incident_summary(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    incident_store: IncidentStoreDependency,
+    event_store: EventStoreDependency,
+    provider: AIProviderDependency,
+    excluded_fields: ExcludedAIContextFieldsDependency,
+) -> IncidentSummary:
+    """Return the summary of the tracked incident with ``incident_id``.
+
+    The incident's cited events are resolved against the whole event history into a
+    timeline, and the configured provider phrases that picture into a short summary.
+    Everything a reader acts on — the status, severity, span, source event IDs and
+    any cited id that no longer resolves — comes from the deterministic picture; only
+    the summary comes from the model, and it is constrained as untrusted output, so a
+    provider outage degrades the summary rather than failing the request. Any event
+    fields a deployment holds back through ``OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`` are
+    kept out of the material the model is shown, without changing that picture. An
+    identifier that matches no stored incident is answered with 404, so a caller can
+    tell a missing incident from one with nothing to describe.
+    """
+    summary = report_incident_summary(
+        incident_store,
+        event_store,
+        incident_id,
+        provider,
+        excluded_fields=excluded_fields,
+    )
+    if summary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return summary
 
 
 @router.post(
