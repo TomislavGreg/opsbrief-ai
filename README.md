@@ -2100,6 +2100,7 @@ started only once the API and core services are stable.
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-080 | Add incident-summary API endpoint | Incident intelligence | Done |
+| AI-082 | Add incident-timeline API endpoint | Incident intelligence | In Progress |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2184,7 +2185,11 @@ fetch an incident summary the same way it fetches a daily brief rather than only
 seeing one on the dashboard. AI-081 is another: `GET /health/ready` gives a
 deployment a readiness probe distinct from the `GET /health` liveness check, so an
 orchestrator can keep a service that cannot reach its database out of rotation
-rather than routing traffic to it.
+rather than routing traffic to it. AI-082 is under way, and rounds out the same
+read path: the incident timeline the service builds and shows on the dashboard is
+becoming readable over HTTP through `GET /incidents/{incident_id}/timeline`, so the
+operations platform can fetch an incident's events laid out in time the same way it
+fetches the incident's summary.
 
 ### Maintaining the CI workflow
 
