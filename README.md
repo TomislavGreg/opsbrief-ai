@@ -2125,6 +2125,7 @@ started only once the API and core services are stable.
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Done |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
+| AI-083 | Filter listed events by occurrence time | Event ingestion | In Progress |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
@@ -2238,7 +2239,10 @@ rather than routing traffic to it. AI-082 rounds out the same read path: the inc
 timeline the service builds and shows on the dashboard is now readable over HTTP
 through `GET /incidents/{incident_id}/timeline`, so the operations platform can fetch
 an incident's events laid out in time, the deterministic picture the summary is
-phrased over, the same way it fetches the incident's summary.
+phrased over, the same way it fetches the incident's summary. AI-083 is under way on
+the read path the platform polls: `GET /events` is gaining `occurred_from` and
+`occurred_to` filters, so a caller can ask for only the events in a time window
+(a match day, the last hour) rather than paging the whole history to find them.
 
 ### Maintaining the CI workflow
 
