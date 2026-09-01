@@ -57,7 +57,8 @@ produced it.
   a secret is configured, so an unconfigured deployment never takes an
   unauthenticated write.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
-  source, type, severity or status and paginated with `limit` and `offset`.
+  source, type, severity or status, narrowed to an occurrence-time window with
+  `occurred_from` and `occurred_to`, and paginated with `limit` and `offset`.
 - A `GET /events/{event_id}` endpoint that returns a single stored event, or
   404 when no event carries that identifier.
 - Two sets of synthetic operational-event fixtures, loadable as validated event
@@ -545,9 +546,20 @@ matches, so a caller can tell whether more pages remain:
 ```
 
 Every filter (`source`, `event_type`, `severity`, `status`) is optional and
-matches its field exactly. `limit` defaults to 50 and holds between 1 and 500;
-`offset` skips that many matches before the page begins. An unknown or
-malformed query parameter is rejected with `422` rather than silently ignored.
+matches its field exactly. `occurred_from` and `occurred_to` narrow the listing
+to events that occurred within an inclusive time window, so a caller can ask for
+just a match day or the last hour rather than paging the whole history:
+
+```bash
+curl 'http://127.0.0.1:8000/events?occurred_from=2026-07-29T00:00:00Z&occurred_to=2026-07-29T23:59:59Z'
+```
+
+Each bound must carry a timezone offset, like an event's `occurred_at`, and is
+normalised to UTC before it is matched; either bound may be given on its own for
+an open-ended window, and a window whose start is later than its end is rejected.
+`limit` defaults to 50 and holds between 1 and 500; `offset` skips that many
+matches before the page begins. An unknown or malformed query parameter is
+rejected with `422` rather than silently ignored.
 
 Retrieve a single stored event by its identifier:
 
@@ -2125,7 +2137,7 @@ started only once the API and core services are stable.
 | AI-014 | Add sample operational-event fixtures | Event ingestion | Done |
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
-| AI-083 | Filter listed events by occurrence time | Event ingestion | In Progress |
+| AI-083 | Filter listed events by occurrence time | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
@@ -2239,8 +2251,8 @@ rather than routing traffic to it. AI-082 rounds out the same read path: the inc
 timeline the service builds and shows on the dashboard is now readable over HTTP
 through `GET /incidents/{incident_id}/timeline`, so the operations platform can fetch
 an incident's events laid out in time, the deterministic picture the summary is
-phrased over, the same way it fetches the incident's summary. AI-083 is under way on
-the read path the platform polls: `GET /events` is gaining `occurred_from` and
+phrased over, the same way it fetches the incident's summary. AI-083 sharpens the
+read path the platform polls: `GET /events` now takes `occurred_from` and
 `occurred_to` filters, so a caller can ask for only the events in a time window
 (a match day, the last hour) rather than paging the whole history to find them.
 
@@ -2253,6 +2265,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
 - 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
 - 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
 - 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
@@ -2266,7 +2279,6 @@ it is not picked up and left half-finished.
 - 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
 - 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
 - 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
-- 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
 
 ## Future Game Center Integration
 

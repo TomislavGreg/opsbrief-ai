@@ -117,7 +117,7 @@ path only):
 
 | Endpoint | Returns |
 |----------|---------|
-| `GET /events` | Stored events, newest first, filtered by source, type, severity or status and paginated. |
+| `GET /events` | Stored events, newest first, filtered by source, type, severity or status, narrowed to an occurrence-time window with `occurred_from` and `occurred_to`, and paginated. |
 | `GET /events/{event_id}` | One stored event, or 404. |
 | `GET /risks` | The current risks across all stored events, most urgent first, each naming the rule and source events behind it. |
 | `GET /brief` | The current daily operations brief: a model-phrased summary alongside the deterministic risks, notes and source event IDs. |
