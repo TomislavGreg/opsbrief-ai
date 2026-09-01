@@ -9,6 +9,7 @@ from opsbrief.services.incident_reporting import (
     resolve_incident,
 )
 from opsbrief.services.incident_summary_reporting import report_incident_summary
+from opsbrief.services.incident_timeline_reporting import report_incident_timeline
 from opsbrief.services.ingestion import record_event, record_events
 from opsbrief.services.readiness import Readiness, check_readiness
 from opsbrief.services.retrieval import get_event, list_events
@@ -28,5 +29,6 @@ __all__ = [
     "record_events",
     "report_daily_brief",
     "report_incident_summary",
+    "report_incident_timeline",
     "resolve_incident",
 ]
