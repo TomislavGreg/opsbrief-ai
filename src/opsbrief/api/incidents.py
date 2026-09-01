@@ -23,6 +23,7 @@ from opsbrief.incidents import (
     IncidentQuery,
     IncidentResolution,
     IncidentSummary,
+    IncidentTimeline,
     InvalidIncidentTransition,
 )
 from opsbrief.services import (
@@ -30,6 +31,7 @@ from opsbrief.services import (
     get_incident,
     list_incidents,
     report_incident_summary,
+    report_incident_timeline,
     resolve_incident,
 )
 
@@ -123,6 +125,40 @@ def read_incident_summary(
             detail=f"no incident is stored under id {incident_id!r}",
         )
     return summary
+
+
+@router.get(
+    "/{incident_id}/timeline",
+    response_model=IncidentTimeline,
+    summary="Lay a tracked incident out in time",
+    response_description="The incident's cited events laid out oldest first, with any gaps named.",
+    responses={404: {"description": "No incident is stored under the requested identifier."}},
+)
+def read_incident_timeline(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    incident_store: IncidentStoreDependency,
+    event_store: EventStoreDependency,
+) -> IncidentTimeline:
+    """Return the timeline of the tracked incident with ``incident_id``.
+
+    The incident's cited events are resolved against the whole event history and
+    laid out oldest first, so the disruption reads forward in time, with the span
+    they ran over derived from them. No model takes part: the timeline is a
+    deterministic view of the incident and the stored events. A cited id that no
+    stored event answers to is named in ``missing_event_ids`` rather than failing
+    the request, so a gap in the evidence is stated plainly. An identifier that
+    matches no stored incident is answered with 404, so a caller can tell a
+    missing incident from one with nothing to lay out.
+    """
+    timeline = report_incident_timeline(incident_store, event_store, incident_id)
+    if timeline is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return timeline
 
 
 @router.post(
