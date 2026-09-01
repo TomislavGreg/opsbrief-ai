@@ -185,6 +185,13 @@ produced it.
   request; a missing incident is answered with 404. It reuses the same
   `generate_incident_summary` path a `GET /brief` reuses for the daily brief, honouring
   `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`.
+- An incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a
+  tracked incident's cited events against the whole event history and returns them laid
+  out oldest first with the span they ran over, the deterministic picture the incident
+  summary is phrased over, without the prose. No model takes part, so a cited id no
+  stored event answers to is named in `missing_event_ids` rather than dropped, the span
+  is derived from the entries, and a missing incident is answered with 404. It reuses
+  the same `build_incident_timeline` the dashboard renders a timeline from.
 - Incident resolution notes: an incident can be resolved with an optional
   operator note explaining how it was put right, over
   `POST /incidents/{incident_id}/resolution`. The note is kept with the incident
@@ -871,6 +878,43 @@ Only the `summary` comes from a language model, and it is treated as untrusted, 
 provider outage returns the deterministic picture with an empty summary and a note
 rather than an error, exactly as `GET /brief` does. An identifier that matches no
 stored incident is answered with `404`.
+
+Lay a tracked incident out in time:
+
+```bash
+curl http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7/timeline
+```
+
+The service answers `200 OK` with the incident's cited events laid out oldest first,
+so the disruption reads forward in time, the span they ran over, and any cited id no
+stored event answers to:
+
+```json
+{
+  "incident_id": "b3f1c2d4e5a6470897a1b2c3d4e5f6a7",
+  "entries": [
+    {
+      "id": "e17",
+      "source": "integrations",
+      "event_type": "integration.failed",
+      "subject": "Ticketing webhook failed",
+      "occurred_at": "2026-07-29T14:05:00Z",
+      "severity": "high",
+      "status": "failed"
+    }
+  ],
+  "missing_event_ids": [],
+  "started_at": "2026-07-29T14:05:00Z",
+  "ended_at": "2026-07-29T14:40:00Z"
+}
+```
+
+No model takes part: the timeline is the deterministic picture the incident summary
+is phrased over, so it is the same events, span and gaps a summary reports, without
+the prose. Each entry carries the fields a timeline describes an event with, not the
+free-form `metadata`. The `started_at` and `ended_at` span is derived from the
+entries, so it never disagrees with them, and both are `null` when no cited event
+resolves. An identifier that matches no stored incident is answered with `404`.
 
 Further endpoints are documented here as they are built.
 
@@ -1897,12 +1941,17 @@ it answers 404 when no incident carries the identifier and 409 when the incident
 cannot move to `resolved` from its current state.
 `GET /incidents/{incident_id}/summary` returns the incident summarised, phrasing
 the deterministic picture with the configured provider the same way `GET /brief`
-phrases the daily brief; it answers 404 when no incident carries the identifier. The
+phrases the daily brief; it answers 404 when no incident carries the identifier.
+`GET /incidents/{incident_id}/timeline` returns the same incident's cited events
+laid out oldest first with the span they ran over, resolved against the whole event
+history the same way `build_incident_timeline` orders them; no model takes part, so
+it is the deterministic picture the summary is phrased over, and it answers 404 when
+no incident carries the identifier. The
 router stays thin: it validates the request and hands the store to the service, which
-declares, reads, resolves or (reading the whole event history and the provider)
-summarises. The transition and note rules stay in the incident model, not the
-router. The application opens the incident store alongside the event store when
-it starts. Examples are shown under [API Examples](#api-examples).
+declares, reads, resolves or (reading the whole event history, and the provider for a
+summary) summarises or lays out a timeline. The transition and note rules stay in the
+incident model, not the router. The application opens the incident store alongside the
+event store when it starts. Examples are shown under [API Examples](#api-examples).
 
 ## Dashboard
 
@@ -2100,7 +2149,7 @@ started only once the API and core services are stable.
 | AI-046 | Add incident persistence | Incident intelligence | Done |
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-080 | Add incident-summary API endpoint | Incident intelligence | Done |
-| AI-082 | Add incident-timeline API endpoint | Incident intelligence | In Progress |
+| AI-082 | Add incident-timeline API endpoint | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2185,11 +2234,11 @@ fetch an incident summary the same way it fetches a daily brief rather than only
 seeing one on the dashboard. AI-081 is another: `GET /health/ready` gives a
 deployment a readiness probe distinct from the `GET /health` liveness check, so an
 orchestrator can keep a service that cannot reach its database out of rotation
-rather than routing traffic to it. AI-082 is under way, and rounds out the same
-read path: the incident timeline the service builds and shows on the dashboard is
-becoming readable over HTTP through `GET /incidents/{incident_id}/timeline`, so the
-operations platform can fetch an incident's events laid out in time the same way it
-fetches the incident's summary.
+rather than routing traffic to it. AI-082 rounds out the same read path: the incident
+timeline the service builds and shows on the dashboard is now readable over HTTP
+through `GET /incidents/{incident_id}/timeline`, so the operations platform can fetch
+an incident's events laid out in time, the deterministic picture the summary is
+phrased over, the same way it fetches the incident's summary.
 
 ### Maintaining the CI workflow
 
@@ -2200,6 +2249,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
 - 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
 - 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
 - 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
@@ -2213,7 +2263,6 @@ it is not picked up and left half-finished.
 - 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
 - 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
 - 2026-08-25 - Recorded the authenticated webhook ingestion design in `docs/webhook-ingestion.md`: the operations platform will post events to `POST /webhooks/events`, a signed front door over the existing batch ingestion that reuses the event contract, authenticates each delivery with an HMAC-SHA256 signature over the raw body keyed by `OPSBRIEF_WEBHOOK_SECRET`, bounds replay with a signed timestamp and skew window, and leans on the existing `(source, external_id)` dedup for idempotency. Design only; the route and its verification are deferred to AI-061, now Ready.
-- 2026-08-25 - Added a worked quality-control incident example: `build_sample_qc_incident` declares an incident around the match-day fixture's rejected goal-line technology calibration check and walks it through the incident lifecycle from `open` to `resolved` at fixed instants, recording a resolution note, and `build_sample_qc_incident_summary` phrases the resolved incident with a scripted fake provider, so the incident model, its transitions and an AI incident summary can be shown over realistic match material without a database, a server or a real model.
 
 ## Future Game Center Integration
 
