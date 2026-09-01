@@ -377,6 +377,34 @@ def test_listing_pages_do_not_overlap(client: TestClient) -> None:
     assert len(set(ids)) == 4
 
 
+def test_listing_filters_by_occurrence_window(client: TestClient) -> None:
+    client.post("/events", json=submission(subject="Early", occurred_at="2026-07-29T08:00:00Z"))
+    client.post("/events", json=submission(subject="Middle", occurred_at="2026-07-29T12:00:00Z"))
+    client.post("/events", json=submission(subject="Late", occurred_at="2026-07-29T20:00:00Z"))
+
+    body = client.get(
+        "/events",
+        params={
+            "occurred_from": "2026-07-29T10:00:00Z",
+            "occurred_to": "2026-07-29T14:00:00Z",
+        },
+    ).json()
+
+    assert body["total"] == 1
+    assert [event["subject"] for event in body["events"]] == ["Middle"]
+
+
+def test_listing_accepts_an_offset_occurrence_bound(client: TestClient) -> None:
+    client.post("/events", json=submission(subject="Before", occurred_at="2026-07-29T08:00:00Z"))
+    client.post("/events", json=submission(subject="After", occurred_at="2026-07-29T12:00:00Z"))
+
+    # A bound with a non-UTC offset is normalised before it is matched: 11:00+02:00
+    # is 09:00 UTC, so only the 12:00 UTC event is at or after it.
+    body = client.get("/events", params={"occurred_from": "2026-07-29T11:00:00+02:00"}).json()
+
+    assert [event["subject"] for event in body["events"]] == ["After"]
+
+
 @pytest.mark.parametrize(
     ("description", "params"),
     [
@@ -386,6 +414,11 @@ def test_listing_pages_do_not_overlap(client: TestClient) -> None:
         ("unknown severity", {"severity": "catastrophic"}),
         ("unknown status", {"status": "pending"}),
         ("unknown query parameter", {"unexpected": "value"}),
+        ("naive occurrence bound", {"occurred_from": "2026-07-29T09:30:00"}),
+        (
+            "reversed occurrence window",
+            {"occurred_from": "2026-07-29T18:00:00Z", "occurred_to": "2026-07-29T09:30:00Z"},
+        ),
     ],
 )
 def test_listing_rejects_invalid_query_parameters(

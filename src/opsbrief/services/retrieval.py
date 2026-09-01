@@ -29,6 +29,8 @@ def list_events(store: EventStore, query: EventQuery) -> EventPage:
         event_type=query.event_type,
         severity=query.severity,
         status=query.status,
+        occurred_from=query.occurred_from,
+        occurred_to=query.occurred_to,
         limit=query.limit,
         offset=query.offset,
     )
@@ -37,5 +39,7 @@ def list_events(store: EventStore, query: EventQuery) -> EventPage:
         event_type=query.event_type,
         severity=query.severity,
         status=query.status,
+        occurred_from=query.occurred_from,
+        occurred_to=query.occurred_to,
     )
     return EventPage(total=total, limit=query.limit, offset=query.offset, events=events)
