@@ -123,6 +123,7 @@ path only):
 | `GET /brief` | The current daily operations brief: a model-phrased summary alongside the deterministic risks, notes and source event IDs. |
 | `GET /incidents`, `GET /incidents/{incident_id}` | Tracked incidents, listed or by id. |
 | `GET /incidents/{incident_id}/summary` | One incident summarised: a model-phrased summary alongside the deterministic status, severity, span and source event IDs. |
+| `GET /incidents/{incident_id}/timeline` | One incident's cited events laid out oldest first with the span they ran over: the deterministic picture the summary is phrased over, without the prose. |
 
 Incidents are the one place the platform may also write, through
 `POST /incidents` and `POST /incidents/{incident_id}/resolution`, when it wants
