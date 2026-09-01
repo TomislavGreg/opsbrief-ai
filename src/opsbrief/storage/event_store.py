@@ -84,18 +84,35 @@ def _filters(
     }
 
 
-def _filter_clause(filters: dict[str, object]) -> tuple[str, dict[str, object]]:
-    """Return a WHERE clause and its parameters for the given column filters.
+def _where(
+    filters: dict[str, object],
+    occurred_from: datetime | None,
+    occurred_to: datetime | None,
+) -> tuple[str, dict[str, object]]:
+    """Return a WHERE clause and its parameters for the given filters.
 
-    Only entries whose value is not ``None`` become equality conditions, so an
-    omitted filter widens the result rather than narrowing it to nothing. The
-    column names are fixed by the caller, never taken from request data.
+    Each equality filter whose value is not ``None`` becomes an ``=`` condition,
+    and each supplied occurrence bound an inclusive range condition on
+    ``occurred_at``; an omitted filter widens the result rather than narrowing it
+    to nothing. A bound is compared as the fixed-width UTC text the column is
+    stored as, so string order is chronological order. The column names are fixed
+    by the caller, never taken from request data.
     """
-    active = {column: value for column, value in filters.items() if value is not None}
-    if not active:
+    conditions: list[str] = []
+    params: dict[str, object] = {}
+    for column, value in filters.items():
+        if value is not None:
+            conditions.append(f"{column} = :{column}")
+            params[column] = value
+    if occurred_from is not None:
+        conditions.append("occurred_at >= :occurred_from")
+        params["occurred_from"] = format_timestamp(occurred_from)
+    if occurred_to is not None:
+        conditions.append("occurred_at <= :occurred_to")
+        params["occurred_to"] = format_timestamp(occurred_to)
+    if not conditions:
         return "", {}
-    clause = " WHERE " + " AND ".join(f"{column} = :{column}" for column in active)
-    return clause, active
+    return " WHERE " + " AND ".join(conditions), params
 
 
 def _from_row(row: sqlite3.Row) -> Event:
@@ -284,15 +301,19 @@ class EventStore:
         event_type: str | None = None,
         severity: EventSeverity | None = None,
         status: EventStatus | None = None,
+        occurred_from: datetime | None = None,
+        occurred_to: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Event]:
         """Return stored events, most recently occurred first.
 
-        Each supplied filter narrows the result to events whose column matches
-        it exactly; omitted filters do not narrow it. ``limit`` and ``offset``
-        page through the matches, so successive pages of the same filters walk
-        the whole result without gaps or repeats.
+        Each supplied column filter narrows the result to events whose column
+        matches it exactly; ``occurred_from`` and ``occurred_to`` narrow it to
+        events that occurred within that inclusive window. Omitted filters do not
+        narrow it. ``limit`` and ``offset`` page through the matches, so
+        successive pages of the same filters walk the whole result without gaps
+        or repeats.
 
         Ties on ``occurred_at`` are broken by ``received_at`` and then ``id`` so
         that the order is stable across calls, which is what makes paging safe.
@@ -301,7 +322,9 @@ class EventStore:
             raise ValueError("limit must be at least 1")
         if offset < 0:
             raise ValueError("offset must not be negative")
-        clause, params = _filter_clause(_filters(source, event_type, severity, status))
+        clause, params = _where(
+            _filters(source, event_type, severity, status), occurred_from, occurred_to
+        )
         params["limit"] = limit
         params["offset"] = offset
         with self._lock:
@@ -320,14 +343,20 @@ class EventStore:
         event_type: str | None = None,
         severity: EventSeverity | None = None,
         status: EventStatus | None = None,
+        occurred_from: datetime | None = None,
+        occurred_to: datetime | None = None,
     ) -> int:
         """Return how many stored events match the given filters.
 
         With no filters this is the total number of stored events; otherwise it
         counts every match, independent of any pagination, so a caller can tell
-        how many pages a filtered listing spans.
+        how many pages a filtered listing spans. It takes the same filters as
+        :meth:`list_events`, occurrence window included, so a filtered listing
+        and its total stay in step.
         """
-        clause, params = _filter_clause(_filters(source, event_type, severity, status))
+        clause, params = _where(
+            _filters(source, event_type, severity, status), occurred_from, occurred_to
+        )
         with self._lock:
             return int(
                 self._connection.execute(f"SELECT COUNT(*) FROM events{clause}", params).fetchone()[

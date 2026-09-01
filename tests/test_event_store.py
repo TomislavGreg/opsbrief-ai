@@ -394,6 +394,60 @@ def test_count_respects_filters(store: EventStore) -> None:
     assert store.count(source="integrations", severity=EventSeverity.HIGH) == 1
 
 
+def test_listing_filters_by_occurrence_window(store: EventStore) -> None:
+    early = make_event(occurred_at=OCCURRED_AT - timedelta(hours=2))
+    middle = make_event(occurred_at=OCCURRED_AT)
+    late = make_event(occurred_at=OCCURRED_AT + timedelta(hours=2))
+    for event in (early, middle, late):
+        store.add(event)
+
+    within = store.list_events(
+        occurred_from=OCCURRED_AT - timedelta(hours=1),
+        occurred_to=OCCURRED_AT + timedelta(hours=1),
+    )
+
+    assert [event.id for event in within] == [middle.id]
+    assert (
+        store.count(
+            occurred_from=OCCURRED_AT - timedelta(hours=1),
+            occurred_to=OCCURRED_AT + timedelta(hours=1),
+        )
+        == 1
+    )
+
+
+def test_occurrence_bounds_are_inclusive(store: EventStore) -> None:
+    at_bound = make_event(occurred_at=OCCURRED_AT)
+    store.add(at_bound)
+
+    assert store.list_events(occurred_from=OCCURRED_AT, occurred_to=OCCURRED_AT) == [at_bound]
+
+
+def test_a_single_occurrence_bound_is_open_ended(store: EventStore) -> None:
+    older = make_event(occurred_at=OCCURRED_AT - timedelta(hours=2))
+    newer = make_event(occurred_at=OCCURRED_AT + timedelta(hours=2))
+    store.add(older)
+    store.add(newer)
+
+    assert [event.id for event in store.list_events(occurred_from=OCCURRED_AT)] == [newer.id]
+    assert [event.id for event in store.list_events(occurred_to=OCCURRED_AT)] == [older.id]
+
+
+def test_occurrence_window_combines_with_column_filters(store: EventStore) -> None:
+    store.add(make_event(source="integrations", occurred_at=OCCURRED_AT))
+    store.add(make_event(source="rostering", occurred_at=OCCURRED_AT))
+    store.add(make_event(source="integrations", occurred_at=OCCURRED_AT + timedelta(days=1)))
+
+    matches = store.list_events(
+        source="integrations",
+        occurred_from=OCCURRED_AT - timedelta(hours=1),
+        occurred_to=OCCURRED_AT + timedelta(hours=1),
+    )
+
+    assert [event.source for event in matches] == ["integrations"]
+    assert len(matches) == 1
+
+
 def test_listing_rejects_a_limit_below_one(store: EventStore) -> None:
     with pytest.raises(ValueError, match="at least 1"):
         store.list_events(limit=0)
