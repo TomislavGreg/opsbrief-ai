@@ -251,6 +251,14 @@ class EventQuery(BaseModel):
         default=None,
         description="Return only events in this state.",
     )
+    occurred_from: datetime | None = Field(
+        default=None,
+        description="Return only events at or after this time. Must carry a timezone offset.",
+    )
+    occurred_to: datetime | None = Field(
+        default=None,
+        description="Return only events at or before this time. Must carry a timezone offset.",
+    )
     limit: int = Field(
         default=DEFAULT_PAGE_SIZE,
         ge=1,
@@ -262,6 +270,21 @@ class EventQuery(BaseModel):
         ge=0,
         description="How many matching events to skip before the page begins.",
     )
+
+    @field_validator("occurred_from", "occurred_to")
+    @classmethod
+    def _normalise_bounds(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else as_utc(value)
+
+    @model_validator(mode="after")
+    def _check_bound_order(self) -> "EventQuery":
+        if (
+            self.occurred_from is not None
+            and self.occurred_to is not None
+            and self.occurred_from > self.occurred_to
+        ):
+            raise ValueError("occurred_from must not be later than occurred_to")
+        return self
 
 
 class EventPage(BaseModel):

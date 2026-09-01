@@ -229,6 +229,23 @@ def test_event_query_parses_filters_and_pagination() -> None:
     assert query.offset == 20
 
 
+def test_event_query_normalises_occurrence_bounds_to_utc() -> None:
+    query = EventQuery(
+        occurred_from="2026-07-29T11:30:00+02:00",
+        occurred_to="2026-07-29T20:00:00+02:00",
+    )
+
+    assert query.occurred_from == datetime(2026, 7, 29, 9, 30, tzinfo=UTC)
+    assert query.occurred_to == datetime(2026, 7, 29, 18, 0, tzinfo=UTC)
+
+
+def test_event_query_allows_an_equal_occurrence_window() -> None:
+    instant = "2026-07-29T09:30:00Z"
+    query = EventQuery(occurred_from=instant, occurred_to=instant)
+
+    assert query.occurred_from == query.occurred_to
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -239,6 +256,9 @@ def test_event_query_parses_filters_and_pagination() -> None:
         {"status": "pending"},
         {"source": ""},
         {"unknown": "value"},
+        {"occurred_from": "2026-07-29T09:30:00"},
+        {"occurred_to": "not-a-timestamp"},
+        {"occurred_from": "2026-07-29T18:00:00Z", "occurred_to": "2026-07-29T09:30:00Z"},
     ],
 )
 def test_event_query_rejects_invalid_input(overrides: dict[str, object]) -> None:
