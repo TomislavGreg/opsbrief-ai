@@ -1,6 +1,6 @@
 """Tests for the incident API request and page schemas."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -102,8 +102,37 @@ def test_a_query_defaults_to_no_filter_and_the_default_page() -> None:
     query = IncidentQuery()
 
     assert query.status is None
+    assert query.severity is None
+    assert query.opened_from is None
+    assert query.opened_to is None
     assert query.limit == DEFAULT_INCIDENT_PAGE_SIZE
     assert query.offset == 0
+
+
+def test_a_query_carries_the_severity_filter() -> None:
+    query = IncidentQuery(severity=IncidentSeverity.CRITICAL)
+
+    assert query.severity is IncidentSeverity.CRITICAL
+
+
+def test_a_query_normalises_opened_bounds_to_utc() -> None:
+    query = IncidentQuery(
+        opened_from="2026-08-16T14:00:00+02:00",
+        opened_to="2026-08-16T18:00:00+02:00",
+    )
+
+    assert query.opened_from == datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    assert query.opened_to == datetime(2026, 8, 16, 16, 0, tzinfo=UTC)
+
+
+def test_a_query_rejects_an_opened_bound_without_an_offset() -> None:
+    with pytest.raises(ValidationError):
+        IncidentQuery(opened_from="2026-08-16T14:00:00")
+
+
+def test_a_query_rejects_an_inverted_opened_window() -> None:
+    with pytest.raises(ValidationError):
+        IncidentQuery(opened_from=NOW, opened_to=NOW - timedelta(hours=1))
 
 
 def test_a_query_rejects_a_limit_above_the_maximum() -> None:
@@ -123,7 +152,7 @@ def test_a_query_rejects_a_negative_offset() -> None:
 
 def test_a_query_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
-        IncidentQuery(severity=IncidentSeverity.HIGH)
+        IncidentQuery(state=IncidentStatus.OPEN)
 
 
 def test_a_page_reports_its_totals_and_incidents() -> None:

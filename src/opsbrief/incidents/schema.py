@@ -378,10 +378,12 @@ class IncidentResolution(BaseModel):
 class IncidentQuery(BaseModel):
     """Filters and pagination for listing stored incidents.
 
-    The status filter is optional and matches the incident's lifecycle state
-    exactly; omitting it lists incidents in every state. Unknown fields are
-    rejected so a mistyped filter fails loudly instead of being silently ignored
-    and returning the wrong page.
+    The status and severity filters are optional and match the incident's
+    lifecycle state and severity exactly; ``opened_from`` and ``opened_to`` narrow
+    the listing to incidents opened within that inclusive window. An omitted
+    filter does not narrow the result. Unknown fields are rejected so a mistyped
+    filter fails loudly instead of being silently ignored and returning the wrong
+    page.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -389,6 +391,18 @@ class IncidentQuery(BaseModel):
     status: IncidentStatus | None = Field(
         default=None,
         description="Return only incidents in this lifecycle state.",
+    )
+    severity: IncidentSeverity | None = Field(
+        default=None,
+        description="Return only incidents of this severity.",
+    )
+    opened_from: datetime | None = Field(
+        default=None,
+        description="Return only incidents opened at or after this time. Needs a timezone offset.",
+    )
+    opened_to: datetime | None = Field(
+        default=None,
+        description="Return only incidents opened at or before this time. Needs a timezone offset.",
     )
     limit: int = Field(
         default=DEFAULT_INCIDENT_PAGE_SIZE,
@@ -401,6 +415,21 @@ class IncidentQuery(BaseModel):
         ge=0,
         description="How many matching incidents to skip before the page begins.",
     )
+
+    @field_validator("opened_from", "opened_to")
+    @classmethod
+    def _normalise_bounds(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else as_utc(value)
+
+    @model_validator(mode="after")
+    def _check_bound_order(self) -> "IncidentQuery":
+        if (
+            self.opened_from is not None
+            and self.opened_to is not None
+            and self.opened_from > self.opened_to
+        ):
+            raise ValueError("opened_from must not be later than opened_to")
+        return self
 
 
 class IncidentPage(BaseModel):
