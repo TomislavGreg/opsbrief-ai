@@ -9,6 +9,7 @@ new declaration) from ``save`` (a change to one that already exists).
 
 import json
 import sqlite3
+from datetime import datetime
 from threading import Lock
 from types import TracebackType
 
@@ -152,22 +153,25 @@ class IncidentStore:
         *,
         status: IncidentStatus | None = None,
         severity: IncidentSeverity | None = None,
+        opened_from: datetime | None = None,
+        opened_to: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Incident]:
         """Return stored incidents, most recently opened first.
 
         A ``status`` filter narrows the result to incidents in that state, and a
-        ``severity`` filter to incidents of that severity; omitting a filter does
-        not narrow the result. ``limit`` and ``offset`` page through the matches.
-        Ties on ``opened_at`` are broken by ``id`` so the order is stable across
-        calls, which is what makes paging safe.
+        ``severity`` filter to incidents of that severity; ``opened_from`` and
+        ``opened_to`` narrow it to incidents opened within that inclusive window.
+        Omitting a filter does not narrow the result. ``limit`` and ``offset``
+        page through the matches. Ties on ``opened_at`` are broken by ``id`` so
+        the order is stable across calls, which is what makes paging safe.
         """
         if limit < 1:
             raise ValueError("limit must be at least 1")
         if offset < 0:
             raise ValueError("offset must not be negative")
-        clause, params = _where(_filters(status, severity))
+        clause, params = _where(_filters(status, severity), opened_from, opened_to)
         params["limit"] = limit
         params["offset"] = offset
         with self._lock:
@@ -182,15 +186,18 @@ class IncidentStore:
         *,
         status: IncidentStatus | None = None,
         severity: IncidentSeverity | None = None,
+        opened_from: datetime | None = None,
+        opened_to: datetime | None = None,
     ) -> int:
         """Return how many stored incidents match the given filters.
 
         With no filter this is the total number of stored incidents; otherwise
         it counts every match independent of pagination, so a caller can tell
         how many pages a filtered listing spans. It takes the same filters as
-        :meth:`list_incidents`, so a filtered listing and its total stay in step.
+        :meth:`list_incidents`, opened window included, so a filtered listing and
+        its total stay in step.
         """
-        clause, params = _where(_filters(status, severity))
+        clause, params = _where(_filters(status, severity), opened_from, opened_to)
         with self._lock:
             return int(
                 self._connection.execute(
@@ -226,13 +233,19 @@ def _filters(
     }
 
 
-def _where(filters: dict[str, object]) -> tuple[str, dict[str, object]]:
+def _where(
+    filters: dict[str, object],
+    opened_from: datetime | None,
+    opened_to: datetime | None,
+) -> tuple[str, dict[str, object]]:
     """Return a WHERE clause and its parameters for the given filters.
 
-    Each filter whose value is not ``None`` becomes an ``=`` condition; an
-    omitted filter widens the result rather than narrowing it to nothing. The
-    column names are fixed by the caller, never taken from request data, and only
-    the values are bound as parameters.
+    Each equality filter whose value is not ``None`` becomes an ``=`` condition,
+    and each supplied opened bound an inclusive range condition on ``opened_at``;
+    an omitted filter widens the result rather than narrowing it to nothing. A
+    bound is compared as the fixed-width UTC text the column is stored as, so
+    string order is chronological order. The column names are fixed by the caller,
+    never taken from request data, and only the values are bound as parameters.
     """
     conditions: list[str] = []
     params: dict[str, object] = {}
@@ -240,6 +253,12 @@ def _where(filters: dict[str, object]) -> tuple[str, dict[str, object]]:
         if value is not None:
             conditions.append(f"{column} = :{column}")
             params[column] = value
+    if opened_from is not None:
+        conditions.append("opened_at >= :opened_from")
+        params["opened_from"] = format_timestamp(opened_from)
+    if opened_to is not None:
+        conditions.append("opened_at <= :opened_to")
+        params["opened_to"] = format_timestamp(opened_to)
     if not conditions:
         return "", {}
     return " WHERE " + " AND ".join(conditions), params
