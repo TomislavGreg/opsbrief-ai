@@ -174,7 +174,8 @@ produced it.
   re-deciding what belongs together.
 - Incident API endpoints: `POST /incidents` declares an incident from a posted
   title, severity and source events and stores it; `GET /incidents` lists stored
-  incidents most recently opened first, filtered by status and paginated; and
+  incidents most recently opened first, filtered by status, severity or an
+  opened-time window (`opened_from` and `opened_to`) and paginated; and
   `GET /incidents/{incident_id}` returns a single stored incident, or 404 when no
   incident carries that identifier.
 - An incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a
@@ -800,10 +801,21 @@ matches, so a caller can tell whether more pages remain:
 }
 ```
 
-The `status` filter is optional and matches the lifecycle state exactly; `limit`
-defaults to 50 and holds between 1 and 500, and `offset` skips that many matches
-before the page begins. A malformed filter or page parameter is rejected with
-`422` rather than silently ignored.
+The `status` and `severity` filters are optional and match the lifecycle state
+and severity exactly. `opened_from` and `opened_to` narrow the listing to
+incidents opened within an inclusive time window, so a caller can ask for just
+the incidents opened during a match or in the last hour:
+
+```bash
+curl 'http://127.0.0.1:8000/incidents?severity=high&opened_from=2026-07-29T00:00:00Z&opened_to=2026-07-29T23:59:59Z'
+```
+
+Each bound must carry a timezone offset, like an incident's `opened_at`, and is
+normalised to UTC before it is matched; either bound may be given on its own for
+an open-ended window, and a window whose start is later than its end is rejected.
+`limit` defaults to 50 and holds between 1 and 500, and `offset` skips that many
+matches before the page begins. A malformed filter or page parameter is rejected
+with `422` rather than silently ignored.
 
 Retrieve a single incident by its identifier:
 
@@ -1944,8 +1956,9 @@ model.
 Incidents are declared and read over HTTP. `POST /incidents` declares an incident
 from a posted title, severity and source events, assigns it an identifier and the
 opening timestamps, starts it `open` and stores it. `GET /incidents` lists the
-stored incidents most recently opened first, filtered by lifecycle status and
-paginated, alongside the total match count. `GET /incidents/{incident_id}` returns
+stored incidents most recently opened first, filtered by lifecycle status,
+severity or an opened-time window (`opened_from` and `opened_to`, inclusive and
+timezone-aware) and paginated, alongside the total match count. `GET /incidents/{incident_id}` returns
 one stored incident, or 404 when no incident carries that identifier.
 `POST /incidents/{incident_id}/resolution` moves a tracked incident to `resolved`
 and records an optional note explaining how it was put right, saving the change;
@@ -2163,7 +2176,7 @@ started only once the API and core services are stable.
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-080 | Add incident-summary API endpoint | Incident intelligence | Done |
 | AI-082 | Add incident-timeline API endpoint | Incident intelligence | Done |
-| AI-084 | Filter listed incidents by severity and open time | Incident intelligence | In Progress |
+| AI-084 | Filter listed incidents by severity and open time | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2256,8 +2269,8 @@ phrased over, the same way it fetches the incident's summary. AI-083 sharpens th
 read path the platform polls: `GET /events` now takes `occurred_from` and
 `occurred_to` filters, so a caller can ask for only the events in a time window
 (a match day, the last hour) rather than paging the whole history to find them.
-AI-084 carries the same idea over to the incident listing: `GET /incidents` is
-gaining `severity`, `opened_from` and `opened_to` filters, so the platform can poll
+AI-084 carries the same idea over to the incident listing: `GET /incidents` now
+takes `severity`, `opened_from` and `opened_to` filters, so the platform can poll
 just the high-severity incidents, or only those opened in a window, rather than
 paging every tracked incident and filtering client-side.
 
@@ -2270,6 +2283,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
 - 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
 - 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
 - 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
@@ -2283,7 +2297,6 @@ it is not picked up and left half-finished.
 - 2026-08-27 - Added a server-rendered dashboard shell at `GET /dashboard`: a small standard-library HTML page (no template engine, no client-side framework) showing the running service's identity and links into the read endpoints (the daily brief, risks, events, incidents, health and the API docs). It is assembled in three thin layers (a `DashboardView` view model, a service that builds it from the settings without reading any store, and a render module that escapes every dynamic value), and is the first step of Phase 7's demo interface.
 - 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
 - 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
-- 2026-08-26 - Added generic webhook ingestion: `POST /webhooks/events` authenticates a signed delivery over the existing batch ingestion, verifying an HMAC-SHA256 signature over the raw body (keyed by `OPSBRIEF_WEBHOOK_SECRET`) with a signed timestamp and skew window against replay before parsing, then storing the events through the same validated, redacted and deduplicated path a direct submission uses. It answers 202 on success, 401 on a signature failure, 413 on an oversized body, 422 on a contract failure, and is disabled with 404 when no secret is configured.
 
 ## Future Game Center Integration
 

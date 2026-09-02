@@ -121,7 +121,7 @@ path only):
 | `GET /events/{event_id}` | One stored event, or 404. |
 | `GET /risks` | The current risks across all stored events, most urgent first, each naming the rule and source events behind it. |
 | `GET /brief` | The current daily operations brief: a model-phrased summary alongside the deterministic risks, notes and source event IDs. |
-| `GET /incidents`, `GET /incidents/{incident_id}` | Tracked incidents, listed or by id. |
+| `GET /incidents`, `GET /incidents/{incident_id}` | Tracked incidents, listed (filtered by status, severity or an opened-time window with `opened_from` and `opened_to`, and paginated) or by id. |
 | `GET /incidents/{incident_id}/summary` | One incident summarised: a model-phrased summary alongside the deterministic status, severity, span and source event IDs. |
 | `GET /incidents/{incident_id}/timeline` | One incident's cited events laid out oldest first with the span they ran over: the deterministic picture the summary is phrased over, without the prose. |
 
