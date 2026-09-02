@@ -12,7 +12,7 @@ import sqlite3
 from threading import Lock
 from types import TracebackType
 
-from opsbrief.incidents import Incident, IncidentStatus
+from opsbrief.incidents import Incident, IncidentSeverity, IncidentStatus
 from opsbrief.storage.database import connect, create_schema
 from opsbrief.storage.event_store import format_timestamp, parse_timestamp
 
@@ -151,21 +151,23 @@ class IncidentStore:
         self,
         *,
         status: IncidentStatus | None = None,
+        severity: IncidentSeverity | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[Incident]:
         """Return stored incidents, most recently opened first.
 
-        A ``status`` filter narrows the result to incidents in that state;
-        omitting it lists them all. ``limit`` and ``offset`` page through the
-        matches. Ties on ``opened_at`` are broken by ``id`` so the order is
-        stable across calls, which is what makes paging safe.
+        A ``status`` filter narrows the result to incidents in that state, and a
+        ``severity`` filter to incidents of that severity; omitting a filter does
+        not narrow the result. ``limit`` and ``offset`` page through the matches.
+        Ties on ``opened_at`` are broken by ``id`` so the order is stable across
+        calls, which is what makes paging safe.
         """
         if limit < 1:
             raise ValueError("limit must be at least 1")
         if offset < 0:
             raise ValueError("offset must not be negative")
-        clause, params = _status_clause(status)
+        clause, params = _where(_filters(status, severity))
         params["limit"] = limit
         params["offset"] = offset
         with self._lock:
@@ -175,14 +177,20 @@ class IncidentStore:
             ).fetchall()
         return [_from_row(row) for row in rows]
 
-    def count(self, *, status: IncidentStatus | None = None) -> int:
-        """Return how many stored incidents match the given status filter.
+    def count(
+        self,
+        *,
+        status: IncidentStatus | None = None,
+        severity: IncidentSeverity | None = None,
+    ) -> int:
+        """Return how many stored incidents match the given filters.
 
         With no filter this is the total number of stored incidents; otherwise
         it counts every match independent of pagination, so a caller can tell
-        how many pages a filtered listing spans.
+        how many pages a filtered listing spans. It takes the same filters as
+        :meth:`list_incidents`, so a filtered listing and its total stay in step.
         """
-        clause, params = _status_clause(status)
+        clause, params = _where(_filters(status, severity))
         with self._lock:
             return int(
                 self._connection.execute(
@@ -207,12 +215,31 @@ class IncidentStore:
         self.close()
 
 
-def _status_clause(status: IncidentStatus | None) -> tuple[str, dict[str, object]]:
-    """Return a WHERE clause and its parameters for an optional status filter.
+def _filters(
+    status: IncidentStatus | None,
+    severity: IncidentSeverity | None,
+) -> dict[str, object]:
+    """Return the column filters as stored values, enums resolved to their text."""
+    return {
+        "status": None if status is None else status.value,
+        "severity": None if severity is None else severity.value,
+    }
 
-    The column name is fixed here, never taken from caller data; only the value
-    is bound as a parameter.
+
+def _where(filters: dict[str, object]) -> tuple[str, dict[str, object]]:
+    """Return a WHERE clause and its parameters for the given filters.
+
+    Each filter whose value is not ``None`` becomes an ``=`` condition; an
+    omitted filter widens the result rather than narrowing it to nothing. The
+    column names are fixed by the caller, never taken from request data, and only
+    the values are bound as parameters.
     """
-    if status is None:
+    conditions: list[str] = []
+    params: dict[str, object] = {}
+    for column, value in filters.items():
+        if value is not None:
+            conditions.append(f"{column} = :{column}")
+            params[column] = value
+    if not conditions:
         return "", {}
-    return " WHERE status = :status", {"status": status.value}
+    return " WHERE " + " AND ".join(conditions), params

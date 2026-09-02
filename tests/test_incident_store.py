@@ -167,6 +167,36 @@ def test_list_filters_by_status(store: IncidentStore) -> None:
     assert [incident.id for incident in listed] == ["inc-resolved"]
 
 
+def test_list_filters_by_severity(store: IncidentStore) -> None:
+    store.add(make_incident(incident_id="inc-high", severity=IncidentSeverity.HIGH))
+    store.add(make_incident(incident_id="inc-low", severity=IncidentSeverity.LOW))
+
+    listed = store.list_incidents(severity=IncidentSeverity.LOW)
+
+    assert [incident.id for incident in listed] == ["inc-low"]
+
+
+def test_list_combines_status_and_severity_filters(store: IncidentStore) -> None:
+    store.add(make_incident(incident_id="inc-open-high", severity=IncidentSeverity.HIGH))
+    store.add(make_incident(incident_id="inc-open-low", severity=IncidentSeverity.LOW))
+    resolved = make_incident(
+        incident_id="inc-resolved-high", severity=IncidentSeverity.HIGH
+    ).transition_to(IncidentStatus.RESOLVED, at=OPENED_AT + timedelta(hours=1))
+    store.add(resolved)
+
+    listed = store.list_incidents(status=IncidentStatus.OPEN, severity=IncidentSeverity.HIGH)
+
+    assert [incident.id for incident in listed] == ["inc-open-high"]
+
+
+def test_count_filters_by_severity(store: IncidentStore) -> None:
+    store.add(make_incident(incident_id="inc-high", severity=IncidentSeverity.HIGH))
+    store.add(make_incident(incident_id="inc-low", severity=IncidentSeverity.LOW))
+
+    assert store.count(severity=IncidentSeverity.HIGH) == 1
+    assert store.count(severity=IncidentSeverity.CRITICAL) == 0
+
+
 def test_list_pages_through_matches(store: IncidentStore) -> None:
     for index in range(3):
         store.add(make_incident(incident_id=f"inc-{index}", at=OPENED_AT + timedelta(hours=index)))
