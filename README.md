@@ -2163,6 +2163,7 @@ started only once the API and core services are stable.
 | AI-047 | Declare incidents from stored events | Incident intelligence | Done |
 | AI-080 | Add incident-summary API endpoint | Incident intelligence | Done |
 | AI-082 | Add incident-timeline API endpoint | Incident intelligence | Done |
+| AI-084 | Filter listed incidents by severity and open time | Incident intelligence | In Progress |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2255,6 +2256,10 @@ phrased over, the same way it fetches the incident's summary. AI-083 sharpens th
 read path the platform polls: `GET /events` now takes `occurred_from` and
 `occurred_to` filters, so a caller can ask for only the events in a time window
 (a match day, the last hour) rather than paging the whole history to find them.
+AI-084 carries the same idea over to the incident listing: `GET /incidents` is
+gaining `severity`, `opened_from` and `opened_to` filters, so the platform can poll
+just the high-severity incidents, or only those opened in a window, rather than
+paging every tracked incident and filtering client-side.
 
 ### Maintaining the CI workflow
 
