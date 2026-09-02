@@ -81,10 +81,18 @@ def list_incidents(store: IncidentStore, query: IncidentQuery) -> IncidentPage:
     """
     incidents = store.list_incidents(
         status=query.status,
+        severity=query.severity,
+        opened_from=query.opened_from,
+        opened_to=query.opened_to,
         limit=query.limit,
         offset=query.offset,
     )
-    total = store.count(status=query.status)
+    total = store.count(
+        status=query.status,
+        severity=query.severity,
+        opened_from=query.opened_from,
+        opened_to=query.opened_to,
+    )
     return IncidentPage(
         total=total,
         limit=query.limit,

@@ -86,6 +86,57 @@ def test_listing_filters_by_status(client: TestClient) -> None:
     assert response.json()["total"] == 0
 
 
+def test_listing_filters_by_severity(client: TestClient) -> None:
+    declare(client, title="High one", severity="high")
+    declare(client, title="Low one", severity="low")
+
+    response = client.get("/incidents", params={"severity": "low"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert [incident["title"] for incident in body["incidents"]] == ["Low one"]
+
+
+def test_a_malformed_severity_filter_is_rejected(client: TestClient) -> None:
+    response = client.get("/incidents", params={"severity": "not-a-severity"})
+
+    assert response.status_code == 422
+
+
+def test_listing_filters_by_opened_window(client: TestClient) -> None:
+    declare(client, title="Just opened")
+
+    past = client.get(
+        "/incidents",
+        params={"opened_to": "2020-01-01T00:00:00Z"},
+    )
+    covering = client.get(
+        "/incidents",
+        params={"opened_from": "2020-01-01T00:00:00Z"},
+    )
+
+    assert past.status_code == 200
+    assert past.json()["total"] == 0
+    assert covering.status_code == 200
+    assert covering.json()["total"] == 1
+
+
+def test_a_malformed_opened_bound_is_rejected(client: TestClient) -> None:
+    response = client.get("/incidents", params={"opened_from": "2026-08-16T14:00:00"})
+
+    assert response.status_code == 422
+
+
+def test_an_inverted_opened_window_is_rejected(client: TestClient) -> None:
+    response = client.get(
+        "/incidents",
+        params={"opened_from": "2026-08-16T18:00:00Z", "opened_to": "2026-08-16T14:00:00Z"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_listing_an_empty_store_is_an_empty_page(client: TestClient) -> None:
     response = client.get("/incidents")
 
