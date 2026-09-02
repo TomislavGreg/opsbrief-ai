@@ -197,6 +197,49 @@ def test_count_filters_by_severity(store: IncidentStore) -> None:
     assert store.count(severity=IncidentSeverity.CRITICAL) == 0
 
 
+def test_list_filters_by_opened_window(store: IncidentStore) -> None:
+    for index in range(3):
+        store.add(make_incident(incident_id=f"inc-{index}", at=OPENED_AT + timedelta(hours=index)))
+
+    listed = store.list_incidents(
+        opened_from=OPENED_AT + timedelta(hours=1),
+        opened_to=OPENED_AT + timedelta(hours=1, minutes=30),
+    )
+
+    assert [incident.id for incident in listed] == ["inc-1"]
+
+
+def test_list_opened_window_bounds_are_inclusive(store: IncidentStore) -> None:
+    for index in range(3):
+        store.add(make_incident(incident_id=f"inc-{index}", at=OPENED_AT + timedelta(hours=index)))
+
+    listed = store.list_incidents(
+        opened_from=OPENED_AT,
+        opened_to=OPENED_AT + timedelta(hours=2),
+    )
+
+    assert [incident.id for incident in listed] == ["inc-2", "inc-1", "inc-0"]
+
+
+def test_list_opened_window_open_ended(store: IncidentStore) -> None:
+    for index in range(3):
+        store.add(make_incident(incident_id=f"inc-{index}", at=OPENED_AT + timedelta(hours=index)))
+
+    assert [i.id for i in store.list_incidents(opened_from=OPENED_AT + timedelta(hours=1))] == [
+        "inc-2",
+        "inc-1",
+    ]
+    assert [i.id for i in store.list_incidents(opened_to=OPENED_AT)] == ["inc-0"]
+
+
+def test_count_filters_by_opened_window(store: IncidentStore) -> None:
+    for index in range(3):
+        store.add(make_incident(incident_id=f"inc-{index}", at=OPENED_AT + timedelta(hours=index)))
+
+    assert store.count(opened_from=OPENED_AT + timedelta(hours=1)) == 2
+    assert store.count(opened_to=OPENED_AT) == 1
+
+
 def test_list_pages_through_matches(store: IncidentStore) -> None:
     for index in range(3):
         store.add(make_incident(incident_id=f"inc-{index}", at=OPENED_AT + timedelta(hours=index)))
