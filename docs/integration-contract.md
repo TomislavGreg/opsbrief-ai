@@ -126,9 +126,11 @@ path only):
 | `GET /incidents/{incident_id}/timeline` | One incident's cited events laid out oldest first with the span they ran over: the deterministic picture the summary is phrased over, without the prose. |
 
 Incidents are the one place the platform may also write, through
-`POST /incidents` and `POST /incidents/{incident_id}/resolution`, when it wants
-OpsBrief AI to track a disruption as a stateful record. This is optional: the read
-path alone gives the platform briefs and risks without declaring anything.
+`POST /incidents`, `POST /incidents/{incident_id}/transition` and
+`POST /incidents/{incident_id}/resolution`, when it wants OpsBrief AI to track a
+disruption as a stateful record and drive it through its lifecycle. This is
+optional: the read path alone gives the platform briefs and risks without
+declaring anything.
 
 Every generated statement traces back to the source event IDs behind it, so the
 platform can always resolve a brief or a risk to the events it sent.
