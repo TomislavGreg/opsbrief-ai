@@ -26,6 +26,7 @@ from opsbrief.incidents.schema import (
     IncidentQuery,
     IncidentResolution,
     IncidentSeverity,
+    IncidentTransition,
 )
 from opsbrief.incidents.summary import (
     INCIDENT_SUMMARY_OUTPUT_VERSION,
@@ -66,6 +67,7 @@ __all__ = [
     "IncidentStatus",
     "IncidentSummary",
     "IncidentTimeline",
+    "IncidentTransition",
     "InvalidIncidentTransition",
     "TimelineEntry",
     "WarningCode",

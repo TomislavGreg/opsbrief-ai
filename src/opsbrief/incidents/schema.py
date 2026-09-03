@@ -375,6 +375,38 @@ class IncidentResolution(BaseModel):
         return stripped or None
 
 
+class IncidentTransition(BaseModel):
+    """A request to move a tracked incident to another lifecycle state.
+
+    This is the body a caller posts to drive an incident through its lifecycle:
+    the target ``status`` to move to, and an optional ``note`` recording how the
+    incident was put right when the move ends it (resolved or closed). The allowed
+    moves are the incident lifecycle's, so a move it does not permit is refused
+    rather than applied, and a note carries only on a move to an inactive state.
+    Unknown fields are rejected so a mistyped body fails loudly rather than being
+    silently dropped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: IncidentStatus = Field(
+        description="The lifecycle state to move the incident to.",
+    )
+    note: str | None = Field(
+        default=None,
+        max_length=MAX_RESOLUTION_NOTE_LENGTH,
+        description="How the incident was put right; recorded only on a move that ends it.",
+    )
+
+    @field_validator("note")
+    @classmethod
+    def _normalise_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
 class IncidentQuery(BaseModel):
     """Filters and pagination for listing stored incidents.
 

@@ -24,6 +24,7 @@ from opsbrief.incidents import (
     IncidentResolution,
     IncidentSummary,
     IncidentTimeline,
+    IncidentTransition,
     InvalidIncidentTransition,
 )
 from opsbrief.services import (
@@ -33,6 +34,7 @@ from opsbrief.services import (
     report_incident_summary,
     report_incident_timeline,
     resolve_incident,
+    transition_incident,
 )
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -208,6 +210,57 @@ def resolve_tracked_incident(
     except InvalidIncidentTransition as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return incident
+
+
+@router.post(
+    "/{incident_id}/transition",
+    response_model=Incident,
+    summary="Move a tracked incident to another lifecycle state",
+    response_description="The stored incident, now in the requested lifecycle state.",
+    responses={
+        404: {"description": "No incident is stored under the requested identifier."},
+        409: {"description": "The requested move is not allowed from the current state."},
+    },
+)
+def transition_tracked_incident(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    transition: IncidentTransition,
+    store: IncidentStoreDependency,
+) -> Incident:
+    """Move the incident with ``incident_id`` to ``transition.status``.
+
+    The incident is moved now and saved, so the platform can drive it through the
+    whole lifecycle (picking work up as ``investigating``, watching it as
+    ``monitoring``, or signing it off as ``closed``), not only resolve it. A body
+    that does not satisfy the contract is rejected with 422. An identifier that
+    matches no stored incident is answered with 404. A move the lifecycle does not
+    allow (a repeat of the current state, or one out of a terminal state) is
+    answered with 409, and a note supplied on a move that reopens the incident is
+    rejected with 422, so a caller can tell a missing incident from an impossible
+    move. Resolving with a note has its own endpoint, ``/resolution``; this one
+    reaches every state uniformly.
+    """
+    now = datetime.now(UTC)
+    try:
+        incident = transition_incident(store, incident_id, transition, now)
+    except InvalidIncidentTransition as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(error),
         ) from error
     if incident is None:
