@@ -200,6 +200,16 @@ produced it.
   (absent while it is active, cleared if it reopens) and carried into the
   incident summary, so a reader sees how the disruption was resolved. Resolving an
   incident already past resolving is refused rather than silently reapplied.
+- Incident lifecycle transitions over HTTP: an incident can be moved to any
+  lifecycle state its current state allows over
+  `POST /incidents/{incident_id}/transition`, so the platform can pick a
+  disruption up as `investigating`, watch it as `monitoring`, sign it off as
+  `closed` or reopen a resolved one, not only declare and resolve it. The allowed
+  moves are the deterministic incident lifecycle's: a move it forbids (repeating
+  the current state, or moving out of the terminal `closed`) is refused with 409, a
+  missing incident is 404, and an optional note is recorded on a move that ends the
+  incident. Resolving with a note keeps its own `POST /incidents/{incident_id}/resolution`
+  endpoint; the transition endpoint reaches every state uniformly.
 - Sensitive-metadata redaction: a metadata value whose key names a sensitive
   term (a credential, an email, a phone number) is masked with a visible
   `[redacted]` marker before the event is stored, so it never reaches the
@@ -861,6 +871,45 @@ stored incident is answered with `404`, and an incident that cannot move to
 `resolved` (one already resolved or closed) is answered with `409` rather than
 silently reapplied, so a caller can tell a missing incident from one already past
 resolving.
+
+Move a tracked incident through its lifecycle:
+
+```bash
+curl -X POST http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7/transition \
+  -H 'Content-Type: application/json' \
+  -d '{ "status": "investigating" }'
+```
+
+The service answers `200 OK` with the incident moved to the requested `status`
+and its `updated_at` advanced:
+
+```json
+{
+  "id": "b3f1c2d4e5a6470897a1b2c3d4e5f6a7",
+  "title": "Ticketing integration failing repeatedly",
+  "status": "investigating",
+  "severity": "high",
+  "opened_at": "2026-07-29T18:00:00Z",
+  "updated_at": "2026-07-29T18:12:00Z",
+  "resolved_at": null,
+  "resolution_note": null,
+  "event_ids": ["e17", "e18", "e19"],
+  "is_active": true,
+  "is_terminal": false
+}
+```
+
+The `status` is the lifecycle state to move to; the allowed moves are the
+deterministic incident lifecycle's, so the platform can drive an incident all the
+way through (`investigating`, `monitoring`, `resolved`, `closed`, and reopening a
+resolved one) rather than only declare and resolve it. A move the lifecycle forbids
+(repeating the current state, or moving out of the terminal `closed`) is answered
+with `409`, a body that does not satisfy the contract with `422`, and an identifier
+that matches no stored incident with `404`. An optional `note` is recorded on a
+move that ends the incident (to `resolved` or `closed`); a note given on a move
+that reopens the incident is refused with `422`. Resolving with a note has its own
+`POST /incidents/{incident_id}/resolution` endpoint, described above; this endpoint
+reaches every state uniformly.
 
 Summarise a tracked incident:
 
@@ -2177,6 +2226,7 @@ started only once the API and core services are stable.
 | AI-080 | Add incident-summary API endpoint | Incident intelligence | Done |
 | AI-082 | Add incident-timeline API endpoint | Incident intelligence | Done |
 | AI-084 | Filter listed incidents by severity and open time | Incident intelligence | Done |
+| AI-085 | Add an incident status-transition endpoint | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2272,7 +2322,12 @@ read path the platform polls: `GET /events` now takes `occurred_from` and
 AI-084 carries the same idea over to the incident listing: `GET /incidents` now
 takes `severity`, `opened_from` and `opened_to` filters, so the platform can poll
 just the high-severity incidents, or only those opened in a window, rather than
-paging every tracked incident and filtering client-side.
+paging every tracked incident and filtering client-side. AI-085 completes the
+incident write path: `POST /incidents/{incident_id}/transition` moves an incident
+to any lifecycle state its current state allows, so the platform can drive a
+disruption through investigation, monitoring and closure (or reopen a resolved
+one), not only declare and resolve it. The moves are the deterministic lifecycle's,
+so an impossible one is a 409 rather than a silent no-op.
 
 ### Maintaining the CI workflow
 
@@ -2283,6 +2338,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
 - 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
 - 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
 - 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
@@ -2296,7 +2352,6 @@ it is not picked up and left half-finished.
 - 2026-08-28 - Added a recent-events panel to the dashboard: `GET /dashboard` now reads the most recent stored events and renders them inline as a bounded, newest-first table above the navigation links, showing the fields a brief describes an event with (not the free-form metadata) and reporting when the view is bounded. An empty store shows an empty state rather than a table, and every event field is escaped as it is placed. This is the first inline view of Phase 7's demo interface.
 - 2026-08-27 - Added a server-rendered dashboard shell at `GET /dashboard`: a small standard-library HTML page (no template engine, no client-side framework) showing the running service's identity and links into the read endpoints (the daily brief, risks, events, incidents, health and the API docs). It is assembled in three thin layers (a `DashboardView` view model, a service that builds it from the settings without reading any store, and a render module that escapes every dynamic value), and is the first step of Phase 7's demo interface.
 - 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
-- 2026-08-26 - Documented the Game Center integration contract in `docs/integration-contract.md`: the one-directional shape, the authenticated webhook write path and its idempotency, the event modelling conventions the deterministic risk rules read, the read endpoints the platform polls, the versioning and security boundary, and what is out of scope, drawing the event contract, the webhook design and the read API into one account the platform builds against.
 
 ## Future Game Center Integration
 
