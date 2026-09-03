@@ -17,6 +17,7 @@ from opsbrief.incidents import (
     IncidentQuery,
     IncidentResolution,
     IncidentStatus,
+    IncidentTransition,
 )
 from opsbrief.storage import IncidentStore
 
@@ -61,6 +62,30 @@ def resolve_incident(
         return None
     resolved = incident.transition_to(IncidentStatus.RESOLVED, at=as_utc(now), note=resolution.note)
     return store.save(resolved)
+
+
+def transition_incident(
+    store: IncidentStore,
+    incident_id: str,
+    transition: IncidentTransition,
+    now: datetime,
+) -> Incident | None:
+    """Move the stored incident with ``incident_id`` to a new state and persist it.
+
+    The incident is moved to ``transition.status`` at ``now``, carrying the optional
+    note when the move ends the incident, then saved. Returns ``None`` when no
+    incident carries the identifier, so the caller can report a missing incident. A
+    move the lifecycle does not allow raises
+    :class:`~opsbrief.incidents.InvalidIncidentTransition`, and a note supplied on a
+    reopening raises :class:`ValueError`; both come from the incident model and the
+    caller turns them into the right response. The transition rules stay in the
+    incident package, not here.
+    """
+    incident = store.get(incident_id)
+    if incident is None:
+        return None
+    moved = incident.transition_to(transition.status, at=as_utc(now), note=transition.note)
+    return store.save(moved)
 
 
 def get_incident(store: IncidentStore, incident_id: str) -> Incident | None:

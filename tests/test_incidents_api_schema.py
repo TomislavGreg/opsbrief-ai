@@ -16,6 +16,7 @@ from opsbrief.incidents import (
     IncidentResolution,
     IncidentSeverity,
     IncidentStatus,
+    IncidentTransition,
 )
 
 NOW = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
@@ -96,6 +97,42 @@ def test_a_resolution_rejects_an_over_long_note() -> None:
 def test_a_resolution_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         IncidentResolution(status=IncidentStatus.RESOLVED)
+
+
+def test_a_transition_carries_its_target_and_defaults_to_no_note() -> None:
+    transition = IncidentTransition(status=IncidentStatus.INVESTIGATING)
+
+    assert transition.status is IncidentStatus.INVESTIGATING
+    assert transition.note is None
+
+
+def test_a_transition_trims_its_note_and_treats_a_blank_as_none() -> None:
+    assert IncidentTransition(status=IncidentStatus.CLOSED, note="  Signed off.  ").note == (
+        "Signed off."
+    )
+    assert IncidentTransition(status=IncidentStatus.CLOSED, note="   ").note is None
+
+
+def test_a_transition_needs_a_target_status() -> None:
+    with pytest.raises(ValidationError):
+        IncidentTransition(note="No target.")
+
+
+def test_a_transition_rejects_an_unknown_status() -> None:
+    with pytest.raises(ValidationError):
+        IncidentTransition(status="archived")
+
+
+def test_a_transition_rejects_an_over_long_note() -> None:
+    with pytest.raises(ValidationError):
+        IncidentTransition(
+            status=IncidentStatus.CLOSED, note="x" * (MAX_RESOLUTION_NOTE_LENGTH + 1)
+        )
+
+
+def test_a_transition_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        IncidentTransition(status=IncidentStatus.INVESTIGATING, extra="x")
 
 
 def test_a_query_defaults_to_no_filter_and_the_default_page() -> None:
