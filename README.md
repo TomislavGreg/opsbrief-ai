@@ -210,6 +210,15 @@ produced it.
   missing incident is 404, and an optional note is recorded on a move that ends the
   incident. Resolving with a note keeps its own `POST /incidents/{incident_id}/resolution`
   endpoint; the transition endpoint reaches every state uniformly.
+- Editing an incident's evidence over HTTP: an incident's cited source events can
+  be grown with `POST /incidents/{incident_id}/events` and trimmed with
+  `DELETE /incidents/{incident_id}/events/{event_id}`, so the platform can attribute
+  more events to a disruption or detach one as the picture develops, not only fix the
+  evidence at declaration. Both go through the deterministic incident model: linking
+  appends without reordering or duplicating and unlinking removes, both idempotent, a
+  body that fails the contract is 422, a missing incident is 404, and a change the
+  model refuses (a closed incident, whose evidence is frozen, or an unlink that would
+  leave the incident with no events) is 409.
 - Sensitive-metadata redaction: a metadata value whose key names a sensitive
   term (a credential, an email, a phone number) is masked with a visible
   `[redacted]` marker before the event is stored, so it never reaches the
@@ -910,6 +919,32 @@ move that ends the incident (to `resolved` or `closed`); a note given on a move
 that reopens the incident is refused with `422`. Resolving with a note has its own
 `POST /incidents/{incident_id}/resolution` endpoint, described above; this endpoint
 reaches every state uniformly.
+
+Attribute more source events to a tracked incident:
+
+```bash
+curl -X POST http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7/events \
+  -H 'Content-Type: application/json' \
+  -d '{ "event_ids": ["e20", "e21"] }'
+```
+
+The service answers `200 OK` with the incident, the new events appended to its
+`event_ids` after the ones already linked and its `updated_at` advanced. Linking
+is idempotent: an id already cited is left where it is, so the evidence is never
+reordered or duplicated. Detach one with a `DELETE`:
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/incidents/b3f1c2d4e5a6470897a1b2c3d4e5f6a7/events/e21
+```
+
+The service answers `200 OK` with the event removed from `event_ids`. Unlinking is
+idempotent too: an id the incident does not cite is ignored and the request still
+succeeds. A body that does not satisfy the contract (an empty list, a blank or
+repeated id, an unknown field) is rejected with `422`, an identifier that matches no
+stored incident is answered with `404`, and a change the incident model refuses (an
+incident already `closed`, whose evidence is frozen, or an unlink that would leave it
+with no source events) is answered with `409`, so a caller can tell a missing
+incident from a frozen or emptied one.
 
 Summarise a tracked incident:
 
@@ -2227,7 +2262,7 @@ started only once the API and core services are stable.
 | AI-082 | Add incident-timeline API endpoint | Incident intelligence | Done |
 | AI-084 | Filter listed incidents by severity and open time | Incident intelligence | Done |
 | AI-085 | Add an incident status-transition endpoint | Incident intelligence | Done |
-| AI-086 | Edit an incident's linked events over HTTP | Incident intelligence | In Progress |
+| AI-086 | Edit an incident's linked events over HTTP | Incident intelligence | Done |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
@@ -2328,7 +2363,13 @@ incident write path: `POST /incidents/{incident_id}/transition` moves an inciden
 to any lifecycle state its current state allows, so the platform can drive a
 disruption through investigation, monitoring and closure (or reopen a resolved
 one), not only declare and resolve it. The moves are the deterministic lifecycle's,
-so an impossible one is a 409 rather than a silent no-op.
+so an impossible one is a 409 rather than a silent no-op. AI-086 finishes the incident
+write path: `POST /incidents/{incident_id}/events` and
+`DELETE /incidents/{incident_id}/events/{event_id}` let the platform grow or trim an
+incident's cited events over HTTP, so its evidence can be edited as the picture
+develops rather than only fixed at declaration. The link and unlink are the
+deterministic incident model's, so both stay idempotent and a change the model refuses
+(a closed incident, or an unlink that would empty the evidence) is a 409.
 
 ### Maintaining the CI workflow
 
@@ -2339,6 +2380,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-04 - Added HTTP editing of an incident's cited events: `POST /incidents/{incident_id}/events` attributes more source events to a tracked incident and `DELETE /incidents/{incident_id}/events/{event_id}` detaches one, so the platform can grow or trim an incident's evidence as the picture develops rather than only fixing it at declaration. Both go through the incident model's link and unlink, so they stay idempotent (linking appends without reordering or duplicating, unlinking ignores an id not cited), a body that fails the contract is a 422, a missing incident a 404, and a change the model refuses (a closed incident, whose evidence is frozen, or an unlink that would leave the incident with no source events) a 409.
 - 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
 - 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
 - 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
@@ -2352,7 +2394,6 @@ it is not picked up and left half-finished.
 - 2026-08-28 - Added an active-risks panel to the dashboard: `GET /dashboard` now runs the canonical risk rules over the whole event history at request time (the same way `GET /risks` does) and renders the prioritized result inline above the recent-events table, showing each risk's severity as a badge and naming the rule and source events behind it. No active risks shows an all-clear empty state, and every risk field is escaped as it is placed.
 - 2026-08-28 - Added a recent-events panel to the dashboard: `GET /dashboard` now reads the most recent stored events and renders them inline as a bounded, newest-first table above the navigation links, showing the fields a brief describes an event with (not the free-form metadata) and reporting when the view is bounded. An empty store shows an empty state rather than a table, and every event field is escaped as it is placed. This is the first inline view of Phase 7's demo interface.
 - 2026-08-27 - Added a server-rendered dashboard shell at `GET /dashboard`: a small standard-library HTML page (no template engine, no client-side framework) showing the running service's identity and links into the read endpoints (the daily brief, risks, events, incidents, health and the API docs). It is assembled in three thin layers (a `DashboardView` view model, a service that builds it from the settings without reading any store, and a render module that escapes every dynamic value), and is the first step of Phase 7's demo interface.
-- 2026-08-27 - Added deployment documentation in `docs/deployment.md`: how to run the service beyond a local checkout, covering the container image and Compose, a plain Python install, the full `OPSBRIEF_` configuration reference, SQLite persistence through a mounted volume with backups, health checks, running behind a TLS-terminating reverse proxy (including forwarding the raw webhook body unmodified so the signature verifies), upgrades against the same database, and the deployment security posture. This completes Phase 6.
 
 ## Future Game Center Integration
 
