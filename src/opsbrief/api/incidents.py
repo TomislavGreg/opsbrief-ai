@@ -18,7 +18,9 @@ from opsbrief.api.dependencies import (
 )
 from opsbrief.incidents import (
     Incident,
+    IncidentClosedError,
     IncidentDeclaration,
+    IncidentEventLink,
     IncidentPage,
     IncidentQuery,
     IncidentResolution,
@@ -30,11 +32,13 @@ from opsbrief.incidents import (
 from opsbrief.services import (
     declare_incident,
     get_incident,
+    link_incident_events,
     list_incidents,
     report_incident_summary,
     report_incident_timeline,
     resolve_incident,
     transition_incident,
+    unlink_incident_event,
 )
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -261,6 +265,92 @@ def transition_tracked_incident(
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
+        ) from error
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return incident
+
+
+@router.post(
+    "/{incident_id}/events",
+    response_model=Incident,
+    summary="Link source events to a tracked incident",
+    response_description="The stored incident, with the requested events attributed to it.",
+    responses={
+        404: {"description": "No incident is stored under the requested identifier."},
+        409: {"description": "The incident is closed, so its events cannot be changed."},
+    },
+)
+def link_tracked_incident_events(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    link: IncidentEventLink,
+    store: IncidentStoreDependency,
+) -> Incident:
+    """Attribute the events in the request body to the incident with ``incident_id``.
+
+    The events are appended to the incident's evidence, in order, and the incident
+    saved, so the platform can grow an incident's evidence as the picture develops.
+    Linking is idempotent: an id already cited is left where it is, so the evidence
+    is never reordered or duplicated. A body that does not satisfy the contract is
+    rejected with 422. An identifier that matches no stored incident is answered
+    with 404. A closed incident is a finished record, so linking to one is answered
+    with 409, so a caller can tell a missing incident from a frozen one.
+    """
+    try:
+        incident = link_incident_events(store, incident_id, link, datetime.now(UTC))
+    except IncidentClosedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return incident
+
+
+@router.delete(
+    "/{incident_id}/events/{event_id}",
+    response_model=Incident,
+    summary="Unlink a source event from a tracked incident",
+    response_description="The stored incident, with the event no longer attributed to it.",
+    responses={
+        404: {"description": "No incident is stored under the requested identifier."},
+        409: {
+            "description": (
+                "The incident is closed, or the event is its last one, so it cannot be removed."
+            )
+        },
+    },
+)
+def unlink_tracked_incident_event(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    event_id: Annotated[str, Path(description="The source event to detach from the incident.")],
+    store: IncidentStoreDependency,
+) -> Incident:
+    """Detach ``event_id`` from the incident with ``incident_id`` and save the change.
+
+    Unlinking is idempotent: an id not currently cited is ignored, so the request
+    still succeeds and returns the unchanged incident. An identifier that matches no
+    stored incident is answered with 404. An incident must always keep at least one
+    source event, so an unlink that would remove its last one is answered with 409,
+    as is unlinking from a closed incident, whose evidence is frozen.
+    """
+    try:
+        incident = unlink_incident_event(store, incident_id, event_id, datetime.now(UTC))
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(error),
         ) from error
     if incident is None:
