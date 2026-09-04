@@ -13,6 +13,7 @@ from opsbrief.events import as_utc
 from opsbrief.incidents import (
     Incident,
     IncidentDeclaration,
+    IncidentEventLink,
     IncidentPage,
     IncidentQuery,
     IncidentResolution,
@@ -86,6 +87,55 @@ def transition_incident(
         return None
     moved = incident.transition_to(transition.status, at=as_utc(now), note=transition.note)
     return store.save(moved)
+
+
+def link_incident_events(
+    store: IncidentStore,
+    incident_id: str,
+    link: IncidentEventLink,
+    now: datetime,
+) -> Incident | None:
+    """Attribute the events in ``link`` to the stored incident and persist it.
+
+    The events are appended to the incident's evidence at ``now``, in the order
+    given, then saved. Linking is idempotent: an id already cited is left where it
+    is, so the evidence is never reordered or duplicated. Returns ``None`` when no
+    incident carries the identifier, so the caller can report a missing incident. A
+    closed incident is frozen, so linking to one raises
+    :class:`~opsbrief.incidents.IncidentClosedError` from the incident model, which
+    the caller turns into a conflict; the linking rules stay in the incident
+    package, not here.
+    """
+    incident = store.get(incident_id)
+    if incident is None:
+        return None
+    linked = incident.link_events(list(link.event_ids), at=as_utc(now))
+    return store.save(linked)
+
+
+def unlink_incident_event(
+    store: IncidentStore,
+    incident_id: str,
+    event_id: str,
+    now: datetime,
+) -> Incident | None:
+    """Detach ``event_id`` from the stored incident and persist the change.
+
+    The event is removed from the incident's evidence at ``now`` and the incident
+    saved. Unlinking is idempotent: an id not currently cited is ignored. Returns
+    ``None`` when no incident carries the identifier, so the caller can report a
+    missing incident. An incident must always cite at least one source event, so an
+    unlink that would remove the last of them raises :class:`ValueError`, and a
+    closed incident is frozen, so unlinking from one raises
+    :class:`~opsbrief.incidents.IncidentClosedError`; both come from the incident
+    model and the caller turns them into a conflict. The linking rules stay in the
+    incident package, not here.
+    """
+    incident = store.get(incident_id)
+    if incident is None:
+        return None
+    unlinked = incident.unlink_events([event_id], at=as_utc(now))
+    return store.save(unlinked)
 
 
 def get_incident(store: IncidentStore, incident_id: str) -> Incident | None:
