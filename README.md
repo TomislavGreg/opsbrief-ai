@@ -2227,6 +2227,7 @@ started only once the API and core services are stable.
 | AI-082 | Add incident-timeline API endpoint | Incident intelligence | Done |
 | AI-084 | Filter listed incidents by severity and open time | Incident intelligence | Done |
 | AI-085 | Add an incident status-transition endpoint | Incident intelligence | Done |
+| AI-086 | Edit an incident's linked events over HTTP | Incident intelligence | In Progress |
 | AI-050 | Add sensitive-field redaction | Safety and explainability | Done |
 | AI-051 | Add configurable fields excluded from AI context | Safety and explainability | Done |
 | AI-052 | Add source references to generated output | Safety and explainability | Done |
