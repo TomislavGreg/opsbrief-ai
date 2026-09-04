@@ -11,6 +11,7 @@ from opsbrief.incidents import (
     MAX_RESOLUTION_NOTE_LENGTH,
     Incident,
     IncidentDeclaration,
+    IncidentEventLink,
     IncidentPage,
     IncidentQuery,
     IncidentResolution,
@@ -133,6 +134,32 @@ def test_a_transition_rejects_an_over_long_note() -> None:
 def test_a_transition_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         IncidentTransition(status=IncidentStatus.INVESTIGATING, extra="x")
+
+
+def test_an_event_link_carries_its_event_ids() -> None:
+    link = IncidentEventLink(event_ids=["e20", "e21"])
+
+    assert link.event_ids == ["e20", "e21"]
+
+
+def test_an_event_link_needs_at_least_one_event() -> None:
+    with pytest.raises(ValidationError):
+        IncidentEventLink(event_ids=[])
+
+
+def test_an_event_link_rejects_blank_event_ids() -> None:
+    with pytest.raises(ValidationError):
+        IncidentEventLink(event_ids=["e1", "  "])
+
+
+def test_an_event_link_rejects_repeated_event_ids() -> None:
+    with pytest.raises(ValidationError):
+        IncidentEventLink(event_ids=["e1", "e1"])
+
+
+def test_an_event_link_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        IncidentEventLink(event_ids=["e1"], status=IncidentStatus.OPEN)
 
 
 def test_a_query_defaults_to_no_filter_and_the_default_page() -> None:

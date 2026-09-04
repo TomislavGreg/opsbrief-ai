@@ -407,6 +407,30 @@ class IncidentTransition(BaseModel):
         return stripped or None
 
 
+class IncidentEventLink(BaseModel):
+    """A request to attribute more source events to a tracked incident.
+
+    This is the body a caller posts to link additional events to an incident as
+    the picture develops. The ``event_ids`` are appended after the ones already
+    linked, in the order given, so the evidence grows without being reordered.
+    The list carries at least one identifier, and each is distinct and non-blank,
+    checked the same way a declaration's events are, so a mistyped body fails
+    loudly rather than being silently dropped. Unknown fields are rejected.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_ids: list[str] = Field(
+        min_length=1,
+        description="Source event IDs to link, in order, distinct and non-blank.",
+    )
+
+    @field_validator("event_ids")
+    @classmethod
+    def _check_event_ids(cls, value: list[str]) -> list[str]:
+        return _check_distinct_nonblank_ids(value)
+
+
 class IncidentQuery(BaseModel):
     """Filters and pagination for listing stored incidents.
 
