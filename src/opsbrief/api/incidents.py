@@ -16,6 +16,7 @@ from opsbrief.api.dependencies import (
     ExcludedAIContextFieldsDependency,
     IncidentStoreDependency,
 )
+from opsbrief.audit import GenerationAudit
 from opsbrief.incidents import (
     Incident,
     IncidentClosedError,
@@ -35,6 +36,7 @@ from opsbrief.services import (
     link_incident_events,
     list_incidents,
     report_incident_summary,
+    report_incident_summary_audit,
     report_incident_timeline,
     resolve_incident,
     transition_incident,
@@ -165,6 +167,50 @@ def read_incident_timeline(
             detail=f"no incident is stored under id {incident_id!r}",
         )
     return timeline
+
+
+@router.get(
+    "/{incident_id}/audit",
+    response_model=GenerationAudit,
+    summary="Audit a tracked incident's summary",
+    response_description="A provenance record of the incident summary: what it came from and by.",
+    responses={404: {"description": "No incident is stored under the requested identifier."}},
+)
+def read_incident_audit(
+    incident_id: Annotated[
+        str, Path(description="The service-assigned identifier of the incident.")
+    ],
+    incident_store: IncidentStoreDependency,
+    event_store: EventStoreDependency,
+    provider: AIProviderDependency,
+    excluded_fields: ExcludedAIContextFieldsDependency,
+) -> GenerationAudit:
+    """Return a provenance record of the tracked incident's summary.
+
+    The incident's summary is generated the same way ``GET
+    /incidents/{incident_id}/summary`` generates it, and projected into a compact
+    audit record naming the incident as its subject: what the summary was produced
+    from (the incident's cited events, and any that no longer resolve) and by (the
+    model that phrased it and the prompt and output versions), together with the
+    confidence and warning codes it reported. The record is a pure projection of the
+    summary, so it never disagrees with it, and is uniform with the daily-brief
+    audit, so a consumer can log or persist provenance across both without
+    special-casing each one. An identifier that matches no stored incident is
+    answered with 404.
+    """
+    audit = report_incident_summary_audit(
+        incident_store,
+        event_store,
+        incident_id,
+        provider,
+        excluded_fields=excluded_fields,
+    )
+    if audit is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no incident is stored under id {incident_id!r}",
+        )
+    return audit
 
 
 @router.post(

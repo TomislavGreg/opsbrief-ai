@@ -17,8 +17,9 @@ from opsbrief.api.dependencies import (
     EventStoreDependency,
     ExcludedAIContextFieldsDependency,
 )
+from opsbrief.audit import GenerationAudit
 from opsbrief.brief import DailyBrief
-from opsbrief.services import report_daily_brief
+from opsbrief.services import report_brief_audit, report_daily_brief
 
 router = APIRouter(prefix="/brief", tags=["brief"])
 
@@ -48,3 +49,29 @@ def read_brief(
     material the model is shown, without changing that deterministic picture.
     """
     return report_daily_brief(store, datetime.now(UTC), provider, excluded_fields=excluded_fields)
+
+
+@router.get(
+    "/audit",
+    response_model=GenerationAudit,
+    summary="Audit the current daily operations brief",
+    response_description="A provenance record of the current brief: what it came from and by.",
+)
+def read_brief_audit(
+    store: EventStoreDependency,
+    provider: AIProviderDependency,
+    excluded_fields: ExcludedAIContextFieldsDependency,
+) -> GenerationAudit:
+    """Return a provenance record of the current daily brief.
+
+    The brief is generated over the whole event history at the moment of the
+    request, the same way ``GET /brief`` generates it, and projected into a compact
+    audit record: what it was produced from (its source event IDs, and any cited id
+    that no longer resolves) and by (the model that phrased it and the prompt and
+    output versions), together with the confidence and warning codes it reported.
+    The record is a pure projection of the brief, so it holds no model involvement
+    of its own beyond the summary the brief already carried and never disagrees with
+    the brief it describes. It is meant to be logged or persisted as a small,
+    self-contained provenance trail, uniform with the incident-summary audit.
+    """
+    return report_brief_audit(store, datetime.now(UTC), provider, excluded_fields=excluded_fields)
