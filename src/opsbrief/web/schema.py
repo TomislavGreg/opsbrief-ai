@@ -72,6 +72,24 @@ class BriefPanel:
 
 
 @dataclass(frozen=True)
+class NextActionRow:
+    """One suggested next action as the dashboard's actions panel shows it.
+
+    Every field is carried straight from the brief's deterministic
+    :class:`~opsbrief.brief.actions.NextAction`: the recommended ``action``, the
+    ``title`` of the risk it addresses so it reads on its own, its ``severity`` so a
+    reader sees how pressing it is, the ``rule`` behind the risk, and the source
+    ``event_ids`` the action traces back to. No model takes part.
+    """
+
+    action: str
+    title: str
+    severity: str
+    rule: str
+    event_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TimelineEntryRow:
     """One event of an incident's timeline as the dashboard shows it.
 
@@ -116,11 +134,12 @@ class DashboardView:
     """The material the dashboard renders.
 
     It carries the running service's identity, the latest daily brief, the current
-    active risks in priority order, the tracked incidents with their timelines, a
-    bounded newest-first view of the most recent stored events, and the set of links
-    into the JSON endpoints. The brief, risks, incidents and recent-events panels
-    are rendered inline; the remaining links are still presented as navigation, and
-    later views fill them in the same way.
+    active risks in priority order, the suggested next actions that address them, the
+    tracked incidents with their timelines, a bounded newest-first view of the most
+    recent stored events, and the set of links into the JSON endpoints. The brief,
+    risks, next-actions, incidents and recent-events panels are rendered inline; the
+    remaining links are still presented as navigation, and later views fill them in
+    the same way.
     """
 
     service_name: str
@@ -129,6 +148,7 @@ class DashboardView:
     links: tuple[DashboardLink, ...]
     brief: BriefPanel | None = None
     active_risks: tuple[RiskRow, ...] = ()
+    next_actions: tuple[NextActionRow, ...] = ()
     incidents: tuple[IncidentRow, ...] = ()
     total_incidents: int = 0
     recent_events: tuple[RecentEventRow, ...] = ()

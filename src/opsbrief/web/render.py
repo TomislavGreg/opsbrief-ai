@@ -14,6 +14,7 @@ from opsbrief.web.schema import (
     DashboardLink,
     DashboardView,
     IncidentRow,
+    NextActionRow,
     RecentEventRow,
     RiskRow,
     TimelineEntryRow,
@@ -53,8 +54,8 @@ section.panel h2 { font-size: 1.15rem; margin: 0 0 0.5rem; }
   color: #555;
   margin: 0;
 }
-ul.risks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
-ul.risks li.risk {
+ul.risks, ul.actions { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+ul.risks li.risk, ul.actions li.action {
   display: flex;
   gap: 0.75rem;
   align-items: baseline;
@@ -63,8 +64,8 @@ ul.risks li.risk {
   border-radius: 0.6rem;
   padding: 0.75rem 1rem;
 }
-.risk-title { margin: 0; font-weight: 600; }
-.risk-meta { margin: 0.2rem 0 0; color: #555; font-size: 0.85rem; }
+.risk-title, .action-title { margin: 0; font-weight: 600; }
+.risk-meta, .action-meta { margin: 0.2rem 0 0; color: #555; font-size: 0.85rem; }
 .sev {
   flex: none;
   display: inline-block;
@@ -292,6 +293,59 @@ def _render_active_risks(view: DashboardView) -> str:
     )
 
 
+def _render_next_action_row(row: NextActionRow) -> str:
+    """Render one suggested-next-action card, escaping every field.
+
+    The severity badge class comes from the same fixed lookup the risks panel uses,
+    so only a known severity reaches the class attribute; the severity text, the
+    action, the risk it addresses, the rule and every cited event id are still
+    escaped as they are placed.
+    """
+    badge_class = _SEVERITY_CLASSES.get(row.severity, "sev-default")
+    events = ", ".join(escape(event_id) for event_id in row.event_ids)
+    return (
+        '<li class="action">'
+        f'<span class="sev {badge_class}">{escape(row.severity)}</span>'
+        "<div>"
+        f'<p class="action-title">{escape(row.action)}</p>'
+        f'<p class="action-meta">Addresses: {escape(row.title)} '
+        f"({escape(row.rule)} rule); source events {events}</p>"
+        "</div>"
+        "</li>"
+    )
+
+
+def _render_next_actions(view: DashboardView) -> str:
+    """Render the next-actions panel: one suggested action per active risk.
+
+    The actions mirror the active risks in priority order, so the most pressing
+    action comes first, and each is the deterministic recommendation for the rule
+    behind its risk, carried straight from the brief. No active risks means nothing
+    to act on, so the empty state says so plainly rather than showing a gap.
+    """
+    if not view.next_actions:
+        return (
+            '<section class="panel">'
+            "<h2>Suggested next actions</h2>"
+            '<p class="empty">No suggested actions: there are no active risks to address.</p>'
+            "</section>"
+        )
+    count = len(view.next_actions)
+    caption = (
+        "1 suggested action, most pressing first."
+        if count == 1
+        else f"{count} suggested actions, most pressing first."
+    )
+    rows = "\n".join(_render_next_action_row(row) for row in view.next_actions)
+    return (
+        '<section class="panel">'
+        "<h2>Suggested next actions</h2>"
+        f'<p class="caption">{escape(caption)}</p>'
+        f'<ul class="actions">\n{rows}\n</ul>'
+        "</section>"
+    )
+
+
 def _render_event_row(row: RecentEventRow) -> str:
     """Render one recent-event table row, escaping every field."""
     status = escape(row.status) if row.status else "&mdash;"
@@ -463,6 +517,7 @@ def render_dashboard_page(view: DashboardView) -> str:
     """
     brief = _render_brief(view)
     active_risks = _render_active_risks(view)
+    next_actions = _render_next_actions(view)
     incidents = _render_incidents(view)
     recent_events = _render_recent_events(view)
     links = "\n".join(_render_link(link) for link in view.links)
@@ -482,10 +537,11 @@ def render_dashboard_page(view: DashboardView) -> str:
 </header>
 <p class="lead">Turn structured operational events into daily briefs, risk warnings and
 incident summaries. This dashboard is a server-rendered face over the existing API;
-the daily-brief, active-risks, incidents and recent-events panels are rendered inline,
-and the links below reach the other JSON endpoints.</p>
+the daily-brief, active-risks, next-actions, incidents and recent-events panels are
+rendered inline, and the links below reach the other JSON endpoints.</p>
 {brief}
 {active_risks}
+{next_actions}
 {incidents}
 {recent_events}
 <ul class="links">
