@@ -268,7 +268,8 @@ produced it.
 - A server-rendered dashboard at `GET /dashboard`: a small HTML page, built from the
   standard library with no template engine or client-side framework, showing the
   running service's identity (name, environment, version), a daily-brief panel, an
-  active-risks panel, an incidents panel with timelines, a bounded newest-first panel of
+  active-risks panel, a suggested-next-actions panel, an incidents panel with timelines,
+  a bounded newest-first panel of
   the most recent stored events, and links into the remaining read endpoints (the daily
   brief, all events, incidents, health and the API docs). The daily-brief panel is the
   current brief across the whole
@@ -279,7 +280,12 @@ produced it.
   active-risks panel runs the canonical rule set over the whole event
   history at request time, the same way `GET /risks` does, and shows each risk with
   its severity as a badge, naming the rule and the source events behind it; no active
-  risks shows an all-clear empty state. The incidents panel shows the five most recently
+  risks shows an all-clear empty state. The suggested-next-actions panel carries the
+  brief's next actions, one per active risk in the same priority order, each showing the
+  recommended step, the risk it addresses, its severity as a badge, and the rule and
+  source events it traces to, so the dashboard names what to do about the risks it shows
+  without a model deciding it; no active risks shows the same all-clear empty state. The
+  incidents panel shows the five most recently
   opened tracked incidents, each with its status and severity as badges and its timeline:
   the cited events laid out oldest first, resolved against the whole event history at
   request time the same way `build_incident_timeline` does, with any cited id no stored
@@ -2139,11 +2145,12 @@ curl http://127.0.0.1:8000/dashboard
 ```
 
 The page shows the running service's identity (name, environment and version, the
-same the `/health` endpoint reports), a daily-brief panel, an active-risks panel, an
-incidents panel with timelines, a panel of the most recent stored events, and links
-into the remaining read endpoints a duty manager reaches for: the daily brief, all
-events, tracked incidents, health and the interactive API docs. The brief, risks,
-incidents and recent-events panels are rendered inline, against the same endpoints.
+same the `/health` endpoint reports), a daily-brief panel, an active-risks panel, a
+suggested-next-actions panel, an incidents panel with timelines, a panel of the most
+recent stored events, and links into the remaining read endpoints a duty manager
+reaches for: the daily brief, all events, tracked incidents, health and the
+interactive API docs. The brief, risks, next-actions, incidents and recent-events
+panels are rendered inline, against the same endpoints.
 
 The daily-brief panel is the current brief across the whole event history at the
 moment of the request, phrased the same way `GET /brief` phrases it. It shows the
@@ -2165,6 +2172,15 @@ and the source events behind it, carried straight from the rule's deterministic
 output, so the panel stays traceable to the evidence and no model takes part. No
 active risks is good news rather than a gap, so the panel shows an all-clear empty
 state.
+
+The suggested-next-actions panel carries the brief's next actions, one per active
+risk in the same priority order, so the panel names not just what the risks are but
+what to do about them. Each action shows the risk's severity as a badge, the
+recommended step, the risk it addresses, the rule behind it and the source events it
+traces to, all carried straight from the brief's deterministic actions, so a
+suggestion traces to the same evidence as its risk and no model decides it. With no
+active risks there is nothing to act on, so the panel shows the same all-clear empty
+state the risks panel does.
 
 The incidents panel shows the five most recently opened tracked incidents, read from
 the incident store the same way the `GET /incidents` listing reads them. Each incident
@@ -2349,7 +2365,7 @@ started only once the API and core services are stable.
 | AI-073 | Display the latest daily brief | Demo interface | Done |
 | AI-074 | Display incidents and timelines | Demo interface | Done |
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
-| AI-088 | Show suggested next actions on the dashboard | Demo interface | In Progress |
+| AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
@@ -2395,7 +2411,11 @@ with their timelines (AI-074) and the most recent stored events (AI-071) inline 
 panels. A public demo-data mode (AI-075) seeds a fresh store on startup with the
 synthetic match-day fixture and the worked quality-control incident, so a public demo
 shows a populated dashboard without anyone posting events first, guarded so it never
-touches a store that already holds real data.
+touches a store that already holds real data. AI-088 rounds the dashboard out: alongside
+the active risks it now shows the brief's suggested next actions, one per risk in
+priority order, so a duty manager sees not just what the risks are but what to do about
+them, carried straight from the brief's deterministic actions with no model deciding
+them.
 
 Phase 3 (AI daily briefs) gained the suggested next actions the brief has always
 described but never carried (AI-038): every daily brief now names, for each risk, a
@@ -2454,6 +2474,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-05 - Added a suggested-next-actions panel to the dashboard: `GET /dashboard` now renders the brief's suggested next actions inline below the active risks, one per active risk in the same priority order, so a duty manager sees not just what the risks are but what to do about them. Each action shows the risk's severity as a badge, the recommended step, the risk it addresses, the rule behind it and the source events it traces to, carried straight from the brief's deterministic actions so a suggestion traces to the same evidence as its risk and no model decides it. No active risks shows the same all-clear empty state the risks panel does, and every field is escaped as it is placed.
 - 2026-09-05 - Exposed the generation audit records over HTTP: `GET /brief/audit` audits the current daily brief and `GET /incidents/{incident_id}/audit` audits a tracked incident's summary, so the platform can log or persist the provenance of a generated output (what it was produced from and by, with the confidence and warning codes it reported) without carrying the full output. Each endpoint generates the brief or summary the same way `GET /brief` and `GET /incidents/{incident_id}/summary` do, then projects it into a compact `GenerationAudit`, so the record never disagrees with the output it describes. A provider outage degrades the audited output rather than failing the request, and a missing incident is a 404.
 - 2026-09-04 - Added HTTP editing of an incident's cited events: `POST /incidents/{incident_id}/events` attributes more source events to a tracked incident and `DELETE /incidents/{incident_id}/events/{event_id}` detaches one, so the platform can grow or trim an incident's evidence as the picture develops rather than only fixing it at declaration. Both go through the incident model's link and unlink, so they stay idempotent (linking appends without reordering or duplicating, unlinking ignores an id not cited), a body that fails the contract is a 422, a missing incident a 404, and a change the model refuses (a closed incident, whose evidence is frozen, or an unlink that would leave the incident with no source events) a 409.
 - 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
@@ -2466,7 +2487,6 @@ it is not picked up and left half-finished.
 - 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
 - 2026-08-29 - Added an incidents panel to the dashboard: `GET /dashboard` now reads the most recently opened tracked incidents (the same way `GET /incidents` does) and renders each inline with its status and severity as badges and its timeline, the cited events laid out oldest first (the same way `build_incident_timeline` orders them) resolved against the whole event history at request time. A cited id no stored event answers to is named as a gap rather than dropped, no tracked incidents shows an empty state, and every field is escaped as it is placed.
 - 2026-08-29 - Added a daily-brief panel to the dashboard: `GET /dashboard` now generates the current brief across the whole event history at request time (the same way `GET /brief` does) and renders it inline above the active-risks panel, showing the model-phrased summary with the model that phrased it, the derived confidence level as a badge and the notes on where the picture is incomplete. Only the summary comes from the model and it is escaped as it is placed; when the provider returns no summary the panel says so plainly rather than blanking the page.
-- 2026-08-28 - Added an active-risks panel to the dashboard: `GET /dashboard` now runs the canonical risk rules over the whole event history at request time (the same way `GET /risks` does) and renders the prioritized result inline above the recent-events table, showing each risk's severity as a badge and naming the rule and source events behind it. No active risks shows an all-clear empty state, and every risk field is escaped as it is placed.
 - 2026-08-28 - Added a recent-events panel to the dashboard: `GET /dashboard` now reads the most recent stored events and renders them inline as a bounded, newest-first table above the navigation links, showing the fields a brief describes an event with (not the free-form metadata) and reporting when the view is bounded. An empty store shows an empty state rather than a table, and every event field is escaped as it is placed. This is the first inline view of Phase 7's demo interface.
 
 ## Future Game Center Integration
