@@ -117,6 +117,38 @@ def test_dashboard_shows_a_detected_risk(client: TestClient) -> None:
     assert "No active risks across the stored events." not in body
 
 
+def test_dashboard_shows_no_next_actions_when_there_are_no_risks(client: TestClient) -> None:
+    # No active risks means nothing to act on, so the next-actions panel says so.
+    _post_event(client, severity="low", status="resolved", subject="All clear")
+
+    body = client.get("/dashboard").text
+
+    assert "Suggested next actions" in body
+    assert "No suggested actions: there are no active risks to address." in body
+
+
+def test_dashboard_shows_a_suggested_next_action_for_a_risk(client: TestClient) -> None:
+    # The same overdue risk the risks panel shows carries a suggested action, and
+    # the next-actions panel names what to do about it, tracing to the same events.
+    _post_event(
+        client,
+        source="rostering",
+        event_type="task.scheduled",
+        subject="Safety inspection for North Stand",
+        status="open",
+        occurred_at="2020-01-01T09:00:00Z",
+        due_at="2020-01-01T18:00:00Z",
+        external_id="inspection-1",
+    )
+
+    body = client.get("/dashboard").text
+
+    assert "Suggested next actions" in body
+    assert "Escalate the overdue work and agree a new completion time with its owner." in body
+    assert "Addresses: Safety inspection for North Stand" in body
+    assert "No suggested actions: there are no active risks to address." not in body
+
+
 def test_dashboard_shows_the_daily_brief_panel(client: TestClient) -> None:
     _post_event(client, subject="Broadcast feed dropped")
 
