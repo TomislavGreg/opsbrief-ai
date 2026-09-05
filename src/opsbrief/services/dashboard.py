@@ -2,10 +2,11 @@
 
 The dashboard is a thin server-rendered face over the existing API. This service
 gathers what the page shows: the service identity, the latest daily brief, the
-current active risks in priority order, the tracked incidents with their timelines,
-a bounded newest-first view of the most recent stored events, and the fixed set of
-links into the remaining JSON endpoints. The identity comes from the settings; the
-brief, risks, incidents and recent events come from the stores and provider,
+current active risks in priority order, the suggested next actions that address
+them, the tracked incidents with their timelines, a bounded newest-first view of
+the most recent stored events, and the fixed set of links into the remaining JSON
+endpoints. The identity comes from the settings; the brief, risks, next actions,
+incidents and recent events come from the stores and provider,
 generated and read the same way the ``GET /brief``, ``GET /risks``,
 ``GET /incidents`` and ``GET /events`` endpoints produce them.
 """
@@ -15,7 +16,7 @@ from datetime import datetime
 
 from opsbrief import __version__
 from opsbrief.ai import AIProvider
-from opsbrief.brief import DailyBrief
+from opsbrief.brief import DailyBrief, NextAction
 from opsbrief.config import Settings
 from opsbrief.events import Event
 from opsbrief.incidents import (
@@ -34,6 +35,7 @@ from opsbrief.web import (
     DashboardLink,
     DashboardView,
     IncidentRow,
+    NextActionRow,
     RecentEventRow,
     RiskRow,
     TimelineEntryRow,
@@ -145,6 +147,22 @@ def _risk_row(risk: Risk) -> RiskRow:
     )
 
 
+def _next_action_row(action: NextAction) -> NextActionRow:
+    """Reduce a brief's suggested next action to the row the dashboard panel shows.
+
+    Every field is carried straight from the deterministic action, which traces to
+    the same rule and source events as the risk it addresses, so the panel names
+    what to do and why without a model taking part.
+    """
+    return NextActionRow(
+        action=action.action,
+        title=action.title,
+        severity=action.severity.value,
+        rule=action.rule,
+        event_ids=tuple(action.event_ids),
+    )
+
+
 def _timeline_entry_row(entry: TimelineEntry) -> TimelineEntryRow:
     """Reduce a timeline entry to the row the dashboard panel shows it as.
 
@@ -208,7 +226,11 @@ def build_dashboard_view(
     and a provider outage degrades to the deterministic picture rather than failing
     the page. The active-risks panel runs the canonical rule set over the whole
     history at ``now`` and ranks the result most urgent first, the same way
-    ``GET /risks`` does. The incidents panel is the ``incident_limit`` most recently
+    ``GET /risks`` does. The next-actions panel carries the brief's suggested next
+    actions, one per active risk in the same priority order, each the deterministic
+    recommendation for the rule behind its risk, so the panel names what to do about
+    the risks without a model deciding it. The incidents panel is the
+    ``incident_limit`` most recently
     opened incidents, read from ``incident_store`` the same way the ``GET /incidents``
     listing reads them, each laid out with its timeline resolved against the whole
     event history the same way ``build_incident_timeline`` does, alongside the total
@@ -241,6 +263,7 @@ def build_dashboard_view(
         links=DASHBOARD_LINKS,
         brief=_brief_panel(brief),
         active_risks=tuple(_risk_row(risk) for risk in risks),
+        next_actions=tuple(_next_action_row(action) for action in brief.next_actions),
         incidents=incident_rows,
         total_incidents=incident_total,
         recent_events=tuple(_recent_event_row(event) for event in recent),
