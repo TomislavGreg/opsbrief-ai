@@ -1,5 +1,9 @@
 """Services: the logic behind the routers."""
 
+from opsbrief.services.audit_reporting import (
+    report_brief_audit,
+    report_incident_summary_audit,
+)
 from opsbrief.services.brief_reporting import report_daily_brief
 from opsbrief.services.dashboard import build_dashboard_view
 from opsbrief.services.incident_reporting import (
@@ -31,7 +35,9 @@ __all__ = [
     "list_risks",
     "record_event",
     "record_events",
+    "report_brief_audit",
     "report_daily_brief",
+    "report_incident_summary_audit",
     "report_incident_summary",
     "report_incident_timeline",
     "resolve_incident",
