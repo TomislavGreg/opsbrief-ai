@@ -5,6 +5,7 @@ from opsbrief.web import (
     DashboardLink,
     DashboardView,
     IncidentRow,
+    NextActionRow,
     RecentEventRow,
     RiskRow,
     TimelineEntryRow,
@@ -80,6 +81,25 @@ _INCIDENTS = (
     ),
 )
 
+_ACTIONS = (
+    NextActionRow(
+        action=(
+            "Investigate the failing integration and restore it before dependent work is affected."
+        ),
+        title="Integration ticketing has failed 5 times",
+        severity="critical",
+        rule="repeated_integration_failure",
+        event_ids=("e17", "e18", "e19", "e20", "e21"),
+    ),
+    NextActionRow(
+        action="Escalate the overdue work and agree a new completion time with its owner.",
+        title="Safety inspection for North Stand is overdue",
+        severity="high",
+        rule="overdue_work",
+        event_ids=("e04",),
+    ),
+)
+
 _VIEW = DashboardView(
     service_name="OpsBrief AI",
     environment="production",
@@ -90,6 +110,7 @@ _VIEW = DashboardView(
     ),
     brief=_BRIEF,
     active_risks=_RISKS,
+    next_actions=_ACTIONS,
     incidents=_INCIDENTS,
     total_incidents=1,
     recent_events=_ROWS,
@@ -286,6 +307,98 @@ def test_risk_fields_are_escaped() -> None:
 
     assert "<script>alert(1)</script>" not in html
     assert "Feed &lt;script&gt;" in html
+    assert "e&lt;1&gt;" in html
+
+
+def test_page_renders_the_next_actions_panel() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "Suggested next actions" in html
+    assert "2 suggested actions, most pressing first." in html
+    assert "Investigate the failing integration" in html
+    assert "Escalate the overdue work" in html
+    # Each action names the risk it addresses and the events it traces to.
+    assert "Addresses: Integration ticketing has failed 5 times" in html
+    assert "repeated_integration_failure rule" in html
+    assert "e17" in html
+
+
+def test_next_actions_follow_the_risk_priority_order() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert html.index("Investigate the failing integration") < html.index(
+        "Escalate the overdue work"
+    )
+
+
+def test_action_severity_is_shown_as_a_badge() -> None:
+    html = render_dashboard_page(_VIEW)
+
+    assert "sev-critical" in html
+    assert "sev-high" in html
+
+
+def test_no_next_actions_shows_an_empty_state() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        next_actions=(),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "Suggested next actions" in html
+    assert "No suggested actions: there are no active risks to address." in html
+
+
+def test_unknown_action_severity_falls_back_to_a_neutral_badge() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        next_actions=(
+            NextActionRow(
+                action="Review this risk, assign an owner and decide the next step.",
+                title="A new kind of risk",
+                severity="surprise",
+                rule="new_rule",
+                event_ids=("e1",),
+            ),
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "sev-default" in html
+    assert ">surprise</span>" in html
+
+
+def test_action_fields_are_escaped() -> None:
+    view = DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        next_actions=(
+            NextActionRow(
+                action="Restart <script>alert(1)</script> now",
+                title="Feed <b>down</b>",
+                severity="high",
+                rule="rule&x",
+                event_ids=("e<1>",),
+            ),
+        ),
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "<script>alert(1)</script>" not in html
+    assert "Restart &lt;script&gt;" in html
+    assert "Feed &lt;b&gt;down&lt;/b&gt;" in html
+    assert "rule&amp;x" in html
     assert "e&lt;1&gt;" in html
 
 
