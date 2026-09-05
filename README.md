@@ -2349,6 +2349,7 @@ started only once the API and core services are stable.
 | AI-073 | Display the latest daily brief | Demo interface | Done |
 | AI-074 | Display incidents and timelines | Demo interface | Done |
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
+| AI-088 | Show suggested next actions on the dashboard | Demo interface | In Progress |
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
