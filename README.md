@@ -2270,6 +2270,7 @@ started only once the API and core services are stable.
 | AI-054 | Add structured generation audit records | Safety and explainability | Done |
 | AI-055 | Add security review and dependency scanning | Safety and explainability | Done |
 | AI-056 | Run dependency scanning in CI | Safety and explainability | Blocked |
+| AI-087 | Expose generation audit records over HTTP | Safety and explainability | In Progress |
 | AI-060 | Add authenticated webhook ingestion design | Game Center readiness | Done |
 | AI-061 | Add generic webhook ingestion | Game Center readiness | Done |
 | AI-062 | Add sports-operations example events | Game Center readiness | Done |
