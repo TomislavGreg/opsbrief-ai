@@ -2322,6 +2322,7 @@ started only once the API and core services are stable.
 | AI-023 | Detect repeated integration failures | Risk detection | Done |
 | AI-024 | Add risk priority scoring | Risk detection | Done |
 | AI-025 | Add risk-list API endpoint | Risk detection | Done |
+| AI-089 | Filter the risk listing by severity and rule | Risk detection | In Progress |
 | AI-030 | Define the AI provider interface | AI daily briefs | Done |
 | AI-031 | Add deterministic test provider | AI daily briefs | Done |
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Done |
