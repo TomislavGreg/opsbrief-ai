@@ -76,6 +76,56 @@ def test_resolved_work_raises_no_risk(client: TestClient) -> None:
     assert body["total"] == 0
 
 
-def test_unknown_query_parameter_is_ignored(client: TestClient) -> None:
-    # The endpoint takes no parameters; a stray one does not break it.
-    assert client.get("/risks", params={"source": "tasks"}).status_code == 200
+def test_severity_filter_narrows_the_snapshot(client: TestClient) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    # Blocked for two days, so high; overdue within the hour, so medium.
+    blocked_id = post_event(
+        client,
+        subject="Blocked task",
+        status="blocked",
+        occurred_at=(now - timedelta(days=2)).isoformat(),
+    )
+    post_event(client, subject="Just-late task", due_at=(now - timedelta(minutes=30)).isoformat())
+
+    body = client.get("/risks", params={"severity": "high"}).json()
+
+    assert body["total"] == 1
+    assert body["risks"][0]["severity"] == "high"
+    assert body["risks"][0]["event_ids"] == [blocked_id]
+
+
+def test_rule_filter_narrows_the_snapshot(client: TestClient) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    post_event(
+        client,
+        subject="Blocked task",
+        status="blocked",
+        occurred_at=(now - timedelta(days=2)).isoformat(),
+    )
+    overdue_id = post_event(client, due_at=(now - timedelta(hours=1)).isoformat())
+
+    body = client.get("/risks", params={"rule": "overdue_work"}).json()
+
+    assert body["total"] == 1
+    assert body["risks"][0]["rule"] == "overdue_work"
+    assert body["risks"][0]["event_ids"] == [overdue_id]
+
+
+def test_a_filter_matching_nothing_returns_an_empty_snapshot(client: TestClient) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    post_event(client, due_at=(now - timedelta(hours=1)).isoformat())
+
+    body = client.get("/risks", params={"severity": "critical"}).json()
+
+    assert body["total"] == 0
+    assert body["risks"] == []
+    assert body["generated_at"]
+
+
+def test_an_unknown_severity_is_rejected(client: TestClient) -> None:
+    assert client.get("/risks", params={"severity": "nope"}).status_code == 422
+
+
+def test_unknown_query_parameter_is_rejected(client: TestClient) -> None:
+    # The endpoint validates its filters, so a stray parameter fails loudly.
+    assert client.get("/risks", params={"source": "tasks"}).status_code == 422

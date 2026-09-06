@@ -6,11 +6,12 @@ result. Risk detection itself lives in the risk package, not here.
 """
 
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from opsbrief.api.dependencies import EventStoreDependency
-from opsbrief.risks import RiskList
+from opsbrief.risks import RiskList, RiskQuery
 from opsbrief.services import list_risks
 
 router = APIRouter(prefix="/risks", tags=["risks"])
@@ -22,12 +23,16 @@ router = APIRouter(prefix="/risks", tags=["risks"])
     summary="List the current operational risks",
     response_description="The current risks, most urgent first, and the instant they were judged.",
 )
-def read_risks(store: EventStoreDependency) -> RiskList:
+def read_risks(query: Annotated[RiskQuery, Query()], store: EventStoreDependency) -> RiskList:
     """Return the risks recognised across the stored events, most urgent first.
 
     Every implemented rule is run over the whole event history at the moment of
-    the request, and the risks they raise are ranked by priority. The reference
-    instant is part of the answer, because a risk is judged against a moment in
-    time, and every risk still cites the rule and the source events behind it.
+    the request, and the risks they raise are ranked by priority. The optional
+    ``severity`` and ``rule`` filters narrow which of those risks are returned
+    without changing detection or the order of what remains; an unknown or
+    malformed filter is rejected with 422 rather than silently ignored. The
+    reference instant is part of the answer, because a risk is judged against a
+    moment in time, and every risk still cites the rule and the source events
+    behind it.
     """
-    return list_risks(store, datetime.now(UTC))
+    return list_risks(store, datetime.now(UTC), query)

@@ -10,19 +10,24 @@ of the events and the instant.
 from datetime import datetime
 
 from opsbrief.events import as_utc
-from opsbrief.risks import RiskList, default_rules, detect_risks, prioritize
+from opsbrief.risks import RiskList, RiskQuery, default_rules, detect_risks, prioritize
 from opsbrief.services.history import read_all_events
 from opsbrief.storage import EventStore
 
 
-def list_risks(store: EventStore, now: datetime) -> RiskList:
+def list_risks(store: EventStore, now: datetime, query: RiskQuery | None = None) -> RiskList:
     """Return the current risks across the stored events, most urgent first.
 
     Every implemented rule is run over the full event history at ``now``, and the
-    risks they raise are ranked by priority. The snapshot records ``now`` as the
+    risks they raise are ranked by priority. When ``query`` narrows by severity or
+    rule, the ranked risks are filtered to those it matches; the filter is applied
+    after ranking, so it never changes detection or the order of what remains, and
+    an omitted query returns the whole picture. The snapshot records ``now`` as the
     instant it was taken, because risk is time-dependent, and every risk in it
     still cites the rule and events behind it.
     """
     reference = as_utc(now)
-    risks = detect_risks(read_all_events(store), default_rules(reference))
-    return RiskList(generated_at=reference, risks=prioritize(risks))
+    risks = prioritize(detect_risks(read_all_events(store), default_rules(reference)))
+    if query is not None:
+        risks = [risk for risk in risks if query.matches(risk)]
+    return RiskList(generated_at=reference, risks=risks)
