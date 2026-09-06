@@ -8,7 +8,7 @@ from opsbrief.risks.rules import (
     RepeatedIntegrationFailureRule,
     default_rules,
 )
-from opsbrief.risks.schema import Risk, RiskList, RiskSeverity
+from opsbrief.risks.schema import Risk, RiskList, RiskQuery, RiskSeverity
 
 __all__ = [
     "SEVERITY_WEIGHT",
@@ -17,6 +17,7 @@ __all__ = [
     "RepeatedIntegrationFailureRule",
     "Risk",
     "RiskList",
+    "RiskQuery",
     "RiskRule",
     "RiskSeverity",
     "default_rules",
