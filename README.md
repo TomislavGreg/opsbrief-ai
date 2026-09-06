@@ -99,7 +99,11 @@ produced it.
   comes first whatever rule raised it.
 - A `GET /risks` endpoint that runs every risk rule over the stored events and
   returns the current risks most urgent first, each naming the rule and source
-  events behind it, with the reference instant the snapshot was judged against.
+  events behind it, with the reference instant the snapshot was judged against,
+  and optionally narrowed by `severity` or `rule` so a caller can poll just the
+  critical risks, or only those from one rule, without filtering the whole
+  snapshot client-side. The filter is applied after ranking, so it never changes
+  detection or the order of what remains.
 - An AI provider interface: a bounded `CompletionRequest`/`CompletionResponse`
   contract and an `AIProvider` protocol that turns already-assembled material into
   prose, used only for phrasing and never for deciding risks, with its output
@@ -677,11 +681,27 @@ the snapshot was judged against:
 }
 ```
 
-The endpoint takes no parameters: it always reports the whole current picture.
-Risks are ordered by priority — severity first, then evidence, as described under
-[Risk Detection](#risk-detection) — so the first risk is the one to act on first.
+By default the endpoint reports the whole current picture. Risks are ordered by
+priority, severity first, then evidence, as described under
+[Risk Detection](#risk-detection), so the first risk is the one to act on first.
 `total` counts the risks, and `generated_at` records when the snapshot was taken,
 because a risk is judged against a moment in time.
+
+Two optional filters narrow which risks are returned, so a caller can poll just
+the part of the picture it cares about rather than filtering client-side:
+
+```bash
+curl 'http://127.0.0.1:8000/risks?severity=critical&rule=repeated_integration_failure'
+```
+
+`severity` keeps only risks the rules judged at that level (`low`, `medium`,
+`high` or `critical`), and `rule` keeps only risks raised by the rule with that
+identifier (`overdue_work`, `blocked_work` or `repeated_integration_failure`).
+Both are optional and combine: giving both returns only the risks that match
+both. The filter is applied after ranking, so it never changes detection or the
+order of what remains, and `generated_at` still records the instant the whole
+snapshot was judged against. An unknown or malformed filter (an unrecognised
+severity, a stray parameter) is rejected with `422` rather than silently ignored.
 
 Generate the current daily operations brief:
 
@@ -1691,7 +1711,10 @@ The `GET /risks` endpoint surfaces exactly this: it runs the canonical rule set
 over the whole stored event history at the moment of the request and returns the
 prioritized risks. The reference instant is part of the answer, because a risk is
 judged against a moment in time, and every risk still cites the rule and the
-source events behind it. An example is shown under [API Examples](#api-examples).
+source events behind it. The listing can be narrowed to one `severity` or one
+`rule` for a caller that wants only part of the picture; the filter runs after
+ranking, so it never changes detection or the order of what remains. An example
+is shown under [API Examples](#api-examples).
 
 ## AI Providers
 
@@ -2322,7 +2345,7 @@ started only once the API and core services are stable.
 | AI-023 | Detect repeated integration failures | Risk detection | Done |
 | AI-024 | Add risk priority scoring | Risk detection | Done |
 | AI-025 | Add risk-list API endpoint | Risk detection | Done |
-| AI-089 | Filter the risk listing by severity and rule | Risk detection | In Progress |
+| AI-089 | Filter the risk listing by severity and rule | Risk detection | Done |
 | AI-030 | Define the AI provider interface | AI daily briefs | Done |
 | AI-031 | Add deterministic test provider | AI daily briefs | Done |
 | AI-032 | Build daily brief context from stored events | AI daily briefs | Done |
@@ -2464,7 +2487,12 @@ has produced since AI-054 are now readable over HTTP through `GET /brief/audit` 
 provenance of a brief or an incident summary (what it was produced from and by)
 without carrying the full output. Each endpoint generates the output the same way
 the brief and summary endpoints do and returns only its audit, so the record never
-disagrees with the output it describes.
+disagrees with the output it describes. AI-089 sharpens the risk read path in the same
+way AI-083 and AI-084 sharpened the event and incident listings: `GET /risks` now takes
+optional `severity` and `rule` filters, so the platform can poll just the critical risks,
+or only those from one rule, rather than filtering the whole snapshot client-side. The
+filter runs after ranking, so it never changes detection or the order of what remains, and
+the endpoint now validates its parameters, so an unknown or malformed one is a 422.
 
 ### Maintaining the CI workflow
 
@@ -2475,6 +2503,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-06 - Added severity and rule filtering to `GET /risks`: the endpoint now takes optional `severity` and `rule` query parameters, so a caller can poll just the critical risks, or only those from one rule, rather than fetching the whole snapshot and filtering client-side. The filters are threaded through a `RiskQuery` model and applied after the risks are ranked, so they never change detection or the order of what remains, and an omitted filter returns the whole picture as before. `generated_at` still records the instant the whole snapshot was judged against. The endpoint now validates its parameters, so an unknown severity or a stray parameter is a 422 rather than silently ignored. This completes the read-path filtering AI-083 and AI-084 began for the event and incident listings.
 - 2026-09-05 - Added a suggested-next-actions panel to the dashboard: `GET /dashboard` now renders the brief's suggested next actions inline below the active risks, one per active risk in the same priority order, so a duty manager sees not just what the risks are but what to do about them. Each action shows the risk's severity as a badge, the recommended step, the risk it addresses, the rule behind it and the source events it traces to, carried straight from the brief's deterministic actions so a suggestion traces to the same evidence as its risk and no model decides it. No active risks shows the same all-clear empty state the risks panel does, and every field is escaped as it is placed.
 - 2026-09-05 - Exposed the generation audit records over HTTP: `GET /brief/audit` audits the current daily brief and `GET /incidents/{incident_id}/audit` audits a tracked incident's summary, so the platform can log or persist the provenance of a generated output (what it was produced from and by, with the confidence and warning codes it reported) without carrying the full output. Each endpoint generates the brief or summary the same way `GET /brief` and `GET /incidents/{incident_id}/summary` do, then projects it into a compact `GenerationAudit`, so the record never disagrees with the output it describes. A provider outage degrades the audited output rather than failing the request, and a missing incident is a 404.
 - 2026-09-04 - Added HTTP editing of an incident's cited events: `POST /incidents/{incident_id}/events` attributes more source events to a tracked incident and `DELETE /incidents/{incident_id}/events/{event_id}` detaches one, so the platform can grow or trim an incident's evidence as the picture develops rather than only fixing it at declaration. Both go through the incident model's link and unlink, so they stay idempotent (linking appends without reordering or duplicating, unlinking ignores an id not cited), a body that fails the contract is a 422, a missing incident a 404, and a change the model refuses (a closed incident, whose evidence is frozen, or an unlink that would leave the incident with no source events) a 409.
@@ -2488,7 +2517,6 @@ it is not picked up and left half-finished.
 - 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
 - 2026-08-29 - Added an incidents panel to the dashboard: `GET /dashboard` now reads the most recently opened tracked incidents (the same way `GET /incidents` does) and renders each inline with its status and severity as badges and its timeline, the cited events laid out oldest first (the same way `build_incident_timeline` orders them) resolved against the whole event history at request time. A cited id no stored event answers to is named as a gap rather than dropped, no tracked incidents shows an empty state, and every field is escaped as it is placed.
 - 2026-08-29 - Added a daily-brief panel to the dashboard: `GET /dashboard` now generates the current brief across the whole event history at request time (the same way `GET /brief` does) and renders it inline above the active-risks panel, showing the model-phrased summary with the model that phrased it, the derived confidence level as a badge and the notes on where the picture is incomplete. Only the summary comes from the model and it is escaped as it is placed; when the provider returns no summary the panel says so plainly rather than blanking the page.
-- 2026-08-28 - Added a recent-events panel to the dashboard: `GET /dashboard` now reads the most recent stored events and renders them inline as a bounded, newest-first table above the navigation links, showing the fields a brief describes an event with (not the free-form metadata) and reporting when the view is bounded. An empty store shows an empty state rather than a table, and every event field is escaped as it is placed. This is the first inline view of Phase 7's demo interface.
 
 ## Future Game Center Integration
 
