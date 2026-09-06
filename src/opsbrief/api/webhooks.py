@@ -39,14 +39,14 @@ def _reject_if_too_large(declared_length: str | None, actual_length: int) -> Non
         try:
             if int(declared_length) > MAX_WEBHOOK_BODY_BYTES:
                 raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="webhook body exceeds the maximum size",
                 )
         except ValueError:
             pass  # A malformed Content-Length is caught by the actual-length check.
     if actual_length > MAX_WEBHOOK_BODY_BYTES:
         raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             detail="webhook body exceeds the maximum size",
         )
 
@@ -102,7 +102,7 @@ async def ingest_events(
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="webhook body is not valid JSON",
         ) from exc
 
@@ -110,7 +110,7 @@ async def ingest_events(
         batch = EventBatch.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=json.loads(exc.json()),
         ) from exc
 
