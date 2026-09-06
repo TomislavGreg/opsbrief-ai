@@ -2331,6 +2331,7 @@ started only once the API and core services are stable.
 | AI-005 | Add SQLite event persistence | Foundation | Done |
 | AI-006 | Update GitHub Actions to Node 24 compatible action versions | Foundation | Done |
 | AI-081 | Add a readiness health check | Foundation | Done |
+| AI-090 | Replace deprecated Starlette status constants | Foundation | In Progress |
 | AI-010 | Add single-event ingestion endpoint | Event ingestion | Done |
 | AI-011 | Add batch-event ingestion | Event ingestion | Done |
 | AI-012 | Add event filtering and pagination | Event ingestion | Done |
