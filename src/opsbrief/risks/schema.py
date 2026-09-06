@@ -87,6 +87,41 @@ class Risk(BaseModel):
         return value
 
 
+class RiskQuery(BaseModel):
+    """Filters for the current risk listing.
+
+    The risk snapshot is always computed over the whole event history at request
+    time; these filters narrow which of the recognised risks are returned, they do
+    not change how detection runs. Both are optional and match exactly, an omitted
+    filter does not narrow the result, and they combine: giving both returns only
+    the risks that match both. Unknown fields are rejected so a mistyped filter
+    fails loudly instead of being silently ignored and returning the wrong picture.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    severity: RiskSeverity | None = Field(
+        default=None,
+        description="Return only risks the rules judged at this severity.",
+    )
+    rule: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Return only risks raised by the rule with this identifier.",
+    )
+
+    def matches(self, risk: "Risk") -> bool:
+        """Return whether ``risk`` satisfies every set filter.
+
+        A filter left unset never excludes a risk, so an empty query matches
+        every risk and the full snapshot is returned unchanged.
+        """
+        if self.severity is not None and risk.severity is not self.severity:
+            return False
+        return self.rule is None or risk.rule == self.rule
+
+
 class RiskList(BaseModel):
     """A snapshot of the risks recognised across the stored events.
 

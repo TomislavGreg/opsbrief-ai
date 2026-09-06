@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from opsbrief.risks import Risk, RiskSeverity
+from opsbrief.risks import Risk, RiskQuery, RiskSeverity
 
 
 def make_risk(**overrides: object) -> dict[str, object]:
@@ -80,3 +80,59 @@ def test_a_risk_is_serialisable() -> None:
     assert dumped["rule"] == "overdue_work"
     assert dumped["severity"] == "high"
     assert dumped["event_ids"] == ["e1", "e2"]
+
+
+def test_an_empty_query_matches_every_risk() -> None:
+    query = RiskQuery()
+    high = Risk(**make_risk(severity=RiskSeverity.HIGH))
+    low = Risk(**make_risk(rule="blocked_work", severity=RiskSeverity.LOW))
+
+    assert query.severity is None
+    assert query.rule is None
+    assert query.matches(high)
+    assert query.matches(low)
+
+
+def test_severity_filter_matches_only_that_severity() -> None:
+    query = RiskQuery(severity=RiskSeverity.HIGH)
+
+    assert query.matches(Risk(**make_risk(severity=RiskSeverity.HIGH)))
+    assert not query.matches(Risk(**make_risk(severity=RiskSeverity.MEDIUM)))
+
+
+def test_severity_filter_accepts_its_string_form() -> None:
+    query = RiskQuery(severity="critical")
+
+    assert query.severity is RiskSeverity.CRITICAL
+
+
+def test_rule_filter_matches_only_that_rule() -> None:
+    query = RiskQuery(rule="overdue_work")
+
+    assert query.matches(Risk(**make_risk(rule="overdue_work")))
+    assert not query.matches(Risk(**make_risk(rule="blocked_work")))
+
+
+def test_filters_combine_with_and() -> None:
+    query = RiskQuery(severity=RiskSeverity.HIGH, rule="overdue_work")
+
+    assert query.matches(Risk(**make_risk(rule="overdue_work", severity=RiskSeverity.HIGH)))
+    # Right rule, wrong severity: both must match.
+    assert not query.matches(Risk(**make_risk(rule="overdue_work", severity=RiskSeverity.LOW)))
+    # Right severity, wrong rule.
+    assert not query.matches(Risk(**make_risk(rule="blocked_work", severity=RiskSeverity.HIGH)))
+
+
+def test_query_rejects_an_unknown_severity() -> None:
+    with pytest.raises(ValidationError):
+        RiskQuery(severity="nope")
+
+
+def test_query_rejects_a_blank_rule() -> None:
+    with pytest.raises(ValidationError):
+        RiskQuery(rule="")
+
+
+def test_query_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        RiskQuery(source="tasks")
