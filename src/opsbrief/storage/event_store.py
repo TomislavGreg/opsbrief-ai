@@ -74,6 +74,8 @@ def _filters(
     event_type: str | None,
     severity: EventSeverity | None,
     status: EventStatus | None,
+    entity_type: str | None,
+    entity_id: str | None,
 ) -> dict[str, object]:
     """Return the column filters as stored values, enums resolved to their text."""
     return {
@@ -81,6 +83,8 @@ def _filters(
         "event_type": event_type,
         "severity": None if severity is None else severity.value,
         "status": None if status is None else status.value,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
     }
 
 
@@ -301,6 +305,8 @@ class EventStore:
         event_type: str | None = None,
         severity: EventSeverity | None = None,
         status: EventStatus | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
         limit: int = 100,
@@ -323,7 +329,9 @@ class EventStore:
         if offset < 0:
             raise ValueError("offset must not be negative")
         clause, params = _where(
-            _filters(source, event_type, severity, status), occurred_from, occurred_to
+            _filters(source, event_type, severity, status, entity_type, entity_id),
+            occurred_from,
+            occurred_to,
         )
         params["limit"] = limit
         params["offset"] = offset
@@ -343,6 +351,8 @@ class EventStore:
         event_type: str | None = None,
         severity: EventSeverity | None = None,
         status: EventStatus | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
         occurred_from: datetime | None = None,
         occurred_to: datetime | None = None,
     ) -> int:
@@ -351,11 +361,13 @@ class EventStore:
         With no filters this is the total number of stored events; otherwise it
         counts every match, independent of any pagination, so a caller can tell
         how many pages a filtered listing spans. It takes the same filters as
-        :meth:`list_events`, occurrence window included, so a filtered listing
-        and its total stay in step.
+        :meth:`list_events`, entity and occurrence window included, so a filtered
+        listing and its total stay in step.
         """
         clause, params = _where(
-            _filters(source, event_type, severity, status), occurred_from, occurred_to
+            _filters(source, event_type, severity, status, entity_type, entity_id),
+            occurred_from,
+            occurred_to,
         )
         with self._lock:
             return int(
