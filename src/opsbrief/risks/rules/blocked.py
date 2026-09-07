@@ -6,10 +6,23 @@ work, blocked work needs no deadline to be a concern — a task that cannot move
 a risk whether or not a clock is running on it.
 
 The rule reads the status a producer stated rather than inferring one, so the
-judgement is theirs to make. How long the work has been blocked is judged against
-a reference instant rather than the wall clock, so the same events and the same
-instant always classify the same way. That keeps detection deterministic and lets
-a test pin the escalation boundary exactly.
+judgement is theirs to make.
+
+A producer reports the same work more than once as its state changes. Events that
+name a stable entity (a source with an ``entity_type`` and ``entity_id``) are
+grouped, and only the entity's current state, its most recent event, is judged:
+work reported blocked and then resolved, cancelled or moved on is no longer
+blocked and stops being reported, and repeated blocked reports raise one risk, not
+one each. How long it has been blocked is measured from when the current run of
+blocked reports began, so re-affirming a block does not reset the clock. Events
+that name no entity cannot be correlated across reports, so each is judged on its
+own. The whole history stays stored as evidence either way. See
+:mod:`opsbrief.risks.work_state`.
+
+How long the work has been blocked is judged against a reference instant rather
+than the wall clock, so the same events and the same instant always classify the
+same way. That keeps detection deterministic and lets a test pin the escalation
+boundary exactly.
 """
 
 from collections.abc import Sequence
@@ -17,6 +30,7 @@ from datetime import datetime, timedelta
 
 from opsbrief.events import Event, EventStatus, as_utc
 from opsbrief.risks.schema import Risk, RiskSeverity
+from opsbrief.risks.work_state import group_work
 
 #: Identifier the blocked-work rule tags its risks with.
 RULE_ID = "blocked_work"
@@ -65,8 +79,18 @@ class BlockedWorkRule:
         self._now = as_utc(now)
 
     def evaluate(self, events: Sequence[Event]) -> list[Risk]:
-        """Return one risk per blocked event, longest blocked first."""
-        blocked = [event for event in events if is_blocked_work(event)]
+        """Return one risk per blocked work item, longest blocked first.
+
+        Each tracked entity contributes at most one risk, judged on its current
+        state, so work that has since been unblocked no longer shows and repeated
+        blocked reports of the same work do not each raise a risk. The event cited
+        is the one that began the current run of blocked reports, so the risk dates
+        from when the work became blocked. Events that name no entity are judged
+        individually, as before.
+        """
+        states, unkeyed = group_work(events)
+        blocked = [start for state in states if (start := state.blocked_run_start()) is not None]
+        blocked += [event for event in unkeyed if is_blocked_work(event)]
         blocked.sort(key=lambda event: (event.occurred_at, event.id))
         return [self._risk(event) for event in blocked]
 
