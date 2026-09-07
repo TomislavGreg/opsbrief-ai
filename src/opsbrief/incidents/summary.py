@@ -24,7 +24,12 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
 from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.events import Event
-from opsbrief.exclusion import shown_value
+from opsbrief.exclusion import (
+    EXCLUSION_PLACEHOLDER,
+    shown_free_text,
+    shown_incident_title,
+    shown_value,
+)
 from opsbrief.incidents.lifecycle import IncidentStatus
 from opsbrief.incidents.schema import Incident, IncidentSeverity
 from opsbrief.incidents.timeline import (
@@ -52,7 +57,7 @@ INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/3"
 #: prose traces to the exact prompt behind it and a change in phrasing is visible
 #: rather than silent. Bump this whenever those instructions or that rendering
 #: change.
-INCIDENT_SUMMARY_PROMPT_VERSION = "incident-summary-prompt/1"
+INCIDENT_SUMMARY_PROMPT_VERSION = "incident-summary-prompt/2"
 
 
 class IncidentSummary(BaseModel):
@@ -238,16 +243,22 @@ def render_incident_material(
     model is shown the same start and end a reader would see, and missing cited
     events are noted so the model is not misled into implying a complete picture.
     A resolution note, when the incident carries one, is shown too, so the model
-    can phrase how the incident was put right. Event fields named in
-    ``excluded_fields`` are held back from the timeline lines with a visible
-    placeholder, narrowing what the model sees without changing the incident's
-    cited evidence or its span.
+    can phrase how the incident was put right. Names in ``excluded_fields`` are held
+    back with a visible placeholder wherever they reach the model: an event field
+    in the timeline lines; ``subject`` in the incident title, which an incident
+    declared from a risk is phrased from; ``occurred_at`` in the span, which is
+    derived from event occurrence; and the free-form-text control in the title and
+    the resolution note. The incident's cited evidence, span and structured output
+    are unchanged.
     """
-    span = "no cited events resolved to a stored record"
-    if timeline.started_at is not None and timeline.ended_at is not None:
+    if "occurred_at" in excluded_fields:
+        span = EXCLUSION_PLACEHOLDER
+    elif timeline.started_at is not None and timeline.ended_at is not None:
         span = f"{timeline.started_at.isoformat()} to {timeline.ended_at.isoformat()}"
+    else:
+        span = "no cited events resolved to a stored record"
     lines: list[str] = [
-        f"Incident: {incident.title}",
+        f"Incident: {shown_incident_title(incident.title, excluded_fields)}",
         f"Status: {incident.status.value}",
         f"Severity: {incident.severity.value}",
         f"Span: {span}",
@@ -258,7 +269,7 @@ def render_incident_material(
         ),
     ]
     if incident.resolution_note is not None:
-        lines += ["", f"Resolution: {incident.resolution_note}"]
+        lines += ["", f"Resolution: {shown_free_text(incident.resolution_note, excluded_fields)}"]
     if timeline.missing_event_ids:
         missing = len(timeline.missing_event_ids)
         lines += [
