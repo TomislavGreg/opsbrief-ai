@@ -41,7 +41,7 @@ BRIEF_OUTPUT_VERSION = "daily-brief/4"
 #: brief records it, so a summary traces to the exact prompt behind it and a
 #: change in phrasing is visible rather than silent. Bump this whenever those
 #: instructions or that rendering change.
-BRIEF_PROMPT_VERSION = "brief-prompt/1"
+BRIEF_PROMPT_VERSION = "brief-prompt/2"
 
 
 class EventDigest(BaseModel):

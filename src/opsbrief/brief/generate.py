@@ -26,7 +26,7 @@ from opsbrief.brief.schema import (
     DailyBrief,
     EventDigest,
 )
-from opsbrief.exclusion import shown_value
+from opsbrief.exclusion import shown_risk_title, shown_value
 from opsbrief.risks import Risk
 from opsbrief.warnings import GenerationWarning, WarningCode
 
@@ -57,10 +57,19 @@ def _constrain_summary(text: str) -> str:
     return collapsed[:MAX_SUMMARY_LENGTH].rstrip()
 
 
-def _render_risk(risk: Risk) -> str:
-    """Render one risk as a single deterministic line of material."""
+def _render_risk(risk: Risk, excluded_fields: Container[str]) -> str:
+    """Render one risk as a single deterministic line of material.
+
+    The risk title is phrased from the event subject behind it, so it is held back
+    with a visible placeholder when ``subject`` is excluded; the rule and the cited
+    event ids, which carry no event field value, are always shown so the model
+    still knows a risk of that kind stands over those events. The severity shown is
+    the rule's own judgement, not the event's ``severity`` field, so it is not
+    affected by excluding that field.
+    """
     events = ", ".join(risk.event_ids)
-    return f"- [{risk.severity.value}] {risk.title} ({risk.rule}; events: {events})"
+    title = shown_risk_title(risk.title, excluded_fields)
+    return f"- [{risk.severity.value}] {title} ({risk.rule}; events: {events})"
 
 
 def _render_event(digest: EventDigest, excluded_fields: Container[str]) -> str:
@@ -93,15 +102,19 @@ def render_context(context: BriefContext, *, excluded_fields: Container[str] = f
     The rendering is deterministic and bounded: the context is already bounded,
     and the result is capped at :data:`MAX_PROMPT_LENGTH` so the request the
     provider receives is always well-formed, whatever the context holds. Event
-    fields named in ``excluded_fields`` are held back from the recent-events view
-    with a visible placeholder, narrowing what the model sees without touching the
-    risks or the source event IDs a reader acts on.
+    fields named in ``excluded_fields`` are held back with a visible placeholder
+    wherever they appear: in the recent-events view, and, for ``subject``, in the
+    risk titles phrased from it. The risks, the notes and the source event IDs a
+    reader acts on are unchanged.
     """
     lines: list[str] = [
         f"Operational picture as of {context.generated_at.isoformat()}.",
         f"{context.event_count} events recorded.",
         "",
-        *_render_section("Risks (most urgent first)", [_render_risk(r) for r in context.risks]),
+        *_render_section(
+            "Risks (most urgent first)",
+            [_render_risk(r, excluded_fields) for r in context.risks],
+        ),
         "",
         *_render_section(
             "Recent events (newest first)",
