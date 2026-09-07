@@ -2333,6 +2333,27 @@ deployment documentation.
 **Phase 7, Demo interface.** A server-rendered dashboard over the existing API,
 started only once the API and core services are stable.
 
+**Phase 8, Correctness and safety.** A hardening pass over the phases above,
+from a September 2026 review. Evaluate current work state before raising risks,
+apply one evaluation instant, keep AI field exclusions covering derived prompt
+text, make incident mutations atomic, read reporting history from a stable
+snapshot, bound and sanitise write requests, give the container writable
+persistent storage, make external write exposure safe by default, validate
+configuration at startup, and make accepted input round-trip through storage and
+generated output.
+
+**Phase 9, Efficiency and reporting.** Reuse one reporting context per request,
+fetch incident evidence by id, bound long lists without dropping analysis,
+persist the audit of an exact generation, separate evidence completeness from
+prose verification, add an opt-in real provider, and give the brief real
+reporting periods, source freshness and an incident section.
+
+**Phase 10, Reliability, tests and operations.** Cross-component behavioural
+scenarios, package and container smoke checks, reproducible dependency
+resolution, documentation reorganisation, explicit routine and branch-protection
+rules, backup and restore diagnostics, versioned schema migrations, and
+dashboard evidence links.
+
 ## Ticket Board
 
 | ID | Ticket | Phase | Status |
@@ -2405,8 +2426,47 @@ started only once the API and core services are stable.
 | AI-074 | Display incidents and timelines | Demo interface | Done |
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
 | AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
+| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Ready |
+| AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Backlog |
+| AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Ready |
+| AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Backlog |
+| AI-096 | Make incident mutations atomic | Correctness and safety | Backlog |
+| AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Backlog |
+| AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Backlog |
+| AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Backlog |
+| AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Backlog |
+| AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Ready |
+| AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Backlog |
+| AI-103 | Validate configuration at startup and make readiness truthful | Correctness and safety | Backlog |
+| AI-104 | Align input validation with stored and generated output contracts | Correctness and safety | Backlog |
+| AI-105 | Make timestamps and database paths round-trip reliably | Correctness and safety | Backlog |
+| AI-106 | Reuse one reporting context per dashboard request | Efficiency and reporting | Backlog |
+| AI-107 | Fetch incident evidence by id instead of scanning every event | Efficiency and reporting | Backlog |
+| AI-108 | Bound risk lists and dashboard and timeline previews without dropping analysis | Efficiency and reporting | Backlog |
+| AI-109 | Enforce event idempotency in SQLite | Efficiency and reporting | Backlog |
+| AI-110 | Persist and retrieve the audit of an exact generation | Efficiency and reporting | Backlog |
+| AI-111 | Separate evidence completeness from prose verification | Efficiency and reporting | Backlog |
+| AI-112 | Add one opt-in real AI provider with bounded execution | Efficiency and reporting | Backlog |
+| AI-113 | Add reporting periods, source freshness and changes since a prior brief | Efficiency and reporting | Backlog |
+| AI-114 | Include tracked incidents and recent resolutions in the daily brief | Efficiency and reporting | Backlog |
+| AI-115 | Make incident creation safe to retry | Efficiency and reporting | Backlog |
+| AI-116 | Record incident status and evidence changes | Efficiency and reporting | Backlog |
+| AI-117 | Make demo timing explicit and seed atomically | Efficiency and reporting | Backlog |
+| AI-118 | Add cross-component behavioural scenarios for the actual failure modes | Reliability, tests and operations | Backlog |
+| AI-119 | Verify built packages and container startup in CI | Reliability, tests and operations | Backlog |
+| AI-120 | Make dependency resolution and compatibility maintenance repeatable | Reliability, tests and operations | Backlog |
+| AI-121 | Remove local duplication and simplify imports after behaviour is fixed | Reliability, tests and operations | Backlog |
+| AI-122 | Reorganise README and documentation around first use and the active board | Reliability, tests and operations | Backlog |
+| AI-123 | Give the routines explicit ticket selection, completion and stop rules | Reliability, tests and operations | Backlog |
+| AI-124 | Enforce the PR and CI gate on main | Reliability, tests and operations | Blocked |
+| AI-125 | Add safe backup and restore diagnostics and a small release checklist | Reliability, tests and operations | Backlog |
+| AI-126 | Version SQLite schema upgrades and test old databases | Reliability, tests and operations | Backlog |
+| AI-127 | Add dashboard evidence links and basic accessibility | Reliability, tests and operations | Backlog |
 
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
+
+Full bodies for the active tickets (AI-092 onward), with evidence, the intended
+change and acceptance criteria, are in [`docs/tickets.md`](docs/tickets.md).
 
 Phase 4 (Incident intelligence) is complete, and Phase 5 (Safety and
 explainability) is complete apart from automating dependency scanning in CI:
@@ -2462,11 +2522,21 @@ deterministic recommended action tracing back to the same events, so a reader se
 not just what the risks are but what to do about them. See
 [Suggested Next Actions](#suggested-next-actions).
 
-Every roadmap phase now has its planned tickets Done, apart from AI-056 (automate
-dependency scanning in CI), which stays Blocked on a workflow change a maintainer
-applies. Further work is added as concrete tickets when a bug, a missing test, a
-reliability or security gap, or a maintainability improvement calls for one, rather
-than by padding the roadmap with speculative features. AI-080 is one such follow-up:
+Phases 0 through 7 have their planned tickets Done. A September 2026 review of the
+whole codebase then opened Phases 8 through 10: a hardening pass over correctness,
+privacy, persistence and request boundaries (AI-092 through AI-105), efficiency and
+reporting depth (AI-106 through AI-117), and reliability, tests and operations
+(AI-118 through AI-127), alongside the still-Blocked AI-056. These are real defects
+and gaps found by inspection and adversarial probing, not speculative features; each
+carries evidence, a minimal change and acceptance criteria in
+[`docs/tickets.md`](docs/tickets.md). At intake AI-092, AI-094 and AI-101 are Ready
+and the rest Backlog, promoted as their dependencies land; AI-124 is Blocked on a
+maintainer branch-protection setting and AI-056 on a workflow change, both needing the
+owner's authorised access. The delivery order starts with the P1 correctness, privacy
+and persistence bugs before adding surface area. Further work is still added as
+concrete tickets when a bug, a missing test, a reliability or security gap, or a
+maintainability improvement calls for one, rather than by padding the roadmap with
+speculative features. AI-080 is one such follow-up:
 the AI incident summary the service has generated since AI-043 is now readable over
 HTTP through `GET /incidents/{incident_id}/summary`, so the operations platform can
 fetch an incident summary the same way it fetches a daily brief rather than only
@@ -2528,6 +2598,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-07 - Opened Phases 8 through 10 from a full-codebase review: added tickets AI-092 through AI-127 to the board, grouped under Correctness and safety, Efficiency and reporting, and Reliability, tests and operations, and put their full bodies (evidence, intended change, acceptance criteria) in `docs/tickets.md`. The tickets are real defects and gaps found by inspection and adversarial probing, chiefly around clearing resolved work from risks, keeping AI exclusions over derived prompt text, atomic incident mutations, stable whole-history reads and request-size limits. At intake AI-092, AI-094 and AI-101 are Ready and the rest Backlog; AI-124 and AI-056 are Blocked on maintainer settings and workflow changes.
 - 2026-09-07 - Added entity filtering to `GET /events`: the listing now takes optional `entity_type` and `entity_id` filters alongside the existing source, type, severity, status and occurrence-window ones, so the platform can fetch every event recorded against one fixture, task or integration rather than paging the whole history and filtering client-side. An entity identifier is only meaningful within its kind, so `entity_id` must be given together with `entity_type` (an `entity_id` on its own is a 422), while `entity_type` alone returns every event about that kind of entity. The filters are exact-match column conditions threaded through the store's `list_events` and `count` so a filtered listing and its total stay in step.
 - 2026-09-06 - Replaced the deprecated Starlette status constants in the API: the webhook and incident-events routers used `HTTP_413_REQUEST_ENTITY_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_ENTITY`, which Starlette renamed to `HTTP_413_CONTENT_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_CONTENT` and now warns on. The routers use the current names, so the service's own code no longer emits a deprecation warning. The numeric codes (413, 422) are unchanged, so the responses are identical and the existing endpoint tests still pin them.
 - 2026-09-06 - Added severity and rule filtering to `GET /risks`: the endpoint now takes optional `severity` and `rule` query parameters, so a caller can poll just the critical risks, or only those from one rule, rather than fetching the whole snapshot and filtering client-side. The filters are threaded through a `RiskQuery` model and applied after the risks are ranked, so they never change detection or the order of what remains, and an omitted filter returns the whole picture as before. `generated_at` still records the instant the whole snapshot was judged against. The endpoint now validates its parameters, so an unknown severity or a stray parameter is a 422 rather than silently ignored. This completes the read-path filtering AI-083 and AI-084 began for the event and incident listings.
@@ -2541,7 +2612,6 @@ it is not picked up and left half-finished.
 - 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
 - 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
 - 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
-- 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
 
 ## Future Game Center Integration
 
