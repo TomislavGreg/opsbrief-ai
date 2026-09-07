@@ -405,6 +405,29 @@ def test_listing_accepts_an_offset_occurrence_bound(client: TestClient) -> None:
     assert [event["subject"] for event in body["events"]] == ["After"]
 
 
+def test_listing_filters_by_entity_type(client: TestClient) -> None:
+    client.post("/events", json=submission(subject="Fixture", entity_type="fixture", entity_id="1"))
+    client.post("/events", json=submission(subject="Task", entity_type="task", entity_id="1"))
+
+    body = client.get("/events", params={"entity_type": "fixture"}).json()
+
+    assert body["total"] == 1
+    assert [event["subject"] for event in body["events"]] == ["Fixture"]
+
+
+def test_listing_filters_by_entity_type_and_id(client: TestClient) -> None:
+    for entity_id in ("4821", "4822"):
+        client.post(
+            "/events",
+            json=submission(subject=entity_id, entity_type="fixture", entity_id=entity_id),
+        )
+
+    body = client.get("/events", params={"entity_type": "fixture", "entity_id": "4821"}).json()
+
+    assert body["total"] == 1
+    assert body["events"][0]["entity_id"] == "4821"
+
+
 @pytest.mark.parametrize(
     ("description", "params"),
     [
@@ -419,6 +442,7 @@ def test_listing_accepts_an_offset_occurrence_bound(client: TestClient) -> None:
             "reversed occurrence window",
             {"occurred_from": "2026-07-29T18:00:00Z", "occurred_to": "2026-07-29T09:30:00Z"},
         ),
+        ("entity id without entity type", {"entity_id": "4821"}),
     ],
 )
 def test_listing_rejects_invalid_query_parameters(
