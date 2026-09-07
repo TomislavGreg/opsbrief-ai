@@ -84,12 +84,18 @@ produced it.
 - A deterministic risk contract and rule interface: a `Risk` that names the rule
   and the source event IDs behind it, a `RiskRule` protocol, and a `detect_risks`
   detector that runs a set of rules over stored events.
-- An overdue-work rule that raises a risk for every event past its deadline and
-  not yet resolved or cancelled, escalating from medium to high once the work is
-  at least a day late, most overdue first.
-- A blocked-work rule that raises a risk for every event a producer reported as
-  blocked, with or without a deadline, escalating from medium to high once the
-  work has been blocked for at least a day, longest blocked first.
+- An overdue-work rule that raises a risk for work past its deadline and not yet
+  resolved or cancelled, escalating from medium to high once the work is at least
+  a day late, most overdue first.
+- A blocked-work rule that raises a risk for work a producer reported as blocked,
+  with or without a deadline, escalating from medium to high once the work has
+  been blocked for at least a day, longest blocked first.
+- Entity-aware evaluation for the overdue and blocked rules: events that name a
+  stable entity (a source with an entity type and id) are grouped, and only the
+  entity's current state (its most recent event) is judged, so a later resolved,
+  cancelled or rescheduled event clears the earlier risk and repeated reports of
+  the same work raise one risk rather than one each. The whole history stays stored
+  as evidence, and an event that names no entity is judged on its own as before.
 - A repeated-integration-failure rule that raises a risk for every integration
   that has failed at least three times within the last week without recovering
   since, citing every failure behind it, high and escalating to critical for a
@@ -1649,18 +1655,31 @@ now = datetime.now(timezone.utc)
 risks = detect_risks(events, [OverdueWorkRule(now)])
 ```
 
-Each risk cites the single overdue event behind it. A risk is `medium` until the
-work is at least a day late, when it escalates to `high`, and the risks come back
-most overdue first.
+A risk is `medium` until the work is at least a day late, when it escalates to
+`high`, and the risks come back most overdue first.
+
+The overdue and blocked rules judge work by its current state, not by each event
+in isolation. A producer reports the same work more than once as it changes, keyed
+to a stable entity (its `source` with an `entity_type` and `entity_id`). Those
+events are grouped and only the entity's most recent event, its current state, is
+judged: a later `resolved` or `cancelled` event clears the earlier risk and a
+later `due_at` replaces an earlier one, so work that has since been finished or
+rescheduled stops being reported, and repeated reports of the same work raise one
+risk rather than one each. Each risk cites the event that established the current
+condition, and the whole history stays stored as evidence. An event that names no
+entity cannot be correlated across reports, so it is judged on its own, exactly as
+before. To get this clearing, a producer sends later state changes under the same
+`entity_id`, as the [integration contract](docs/integration-contract.md) describes.
 
 The second rule is `BlockedWorkRule`. Work is blocked when its producer said so:
 the rule trusts the stated `status` of `blocked` rather than inferring one, and a
 deadline is not required — work that cannot move is a concern whether or not a
 clock is running on it. Like the overdue rule it is built with the reference
 instant it judges against, and it escalates by duration: a risk is `medium` until
-the work has been blocked for at least a day, measured from when the event was
-reported, when it escalates to `high`. Each risk cites the single blocked event,
-and the risks come back longest-blocked first, ties broken by event id.
+the work has been blocked for at least a day, measured from when the current run
+of blocked reports began, when it escalates to `high`. Each risk cites the event
+that began that run, and the risks come back longest-blocked first, ties broken by
+event id.
 
 ```python
 from datetime import datetime, timezone
@@ -2426,7 +2445,7 @@ dashboard evidence links.
 | AI-074 | Display incidents and timelines | Demo interface | Done |
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
 | AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
-| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Ready |
+| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Done |
 | AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Backlog |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Ready |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Backlog |
@@ -2598,6 +2617,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-07 - Evaluated work by its current state in the overdue and blocked rules (AI-092): events that name a stable entity (a source with an entity type and id) are grouped and only the entity's most recent event, its current state, is judged. A later resolved or cancelled event now clears the earlier blocked or overdue risk, a later deadline replaces an earlier one, and repeated reports of the same work raise one risk rather than one each. This makes the rules honour the integration contract, that a later state change for the same entity id clears a situation, which the per-event rules did not. Events that name no entity are still judged individually, and the whole history stays stored as evidence. Added a work-state projection module, unit tests and a table-driven behavioural suite through risk reporting and a generated brief.
 - 2026-09-07 - Opened Phases 8 through 10 from a full-codebase review: added tickets AI-092 through AI-127 to the board, grouped under Correctness and safety, Efficiency and reporting, and Reliability, tests and operations, and put their full bodies (evidence, intended change, acceptance criteria) in `docs/tickets.md`. The tickets are real defects and gaps found by inspection and adversarial probing, chiefly around clearing resolved work from risks, keeping AI exclusions over derived prompt text, atomic incident mutations, stable whole-history reads and request-size limits. At intake AI-092, AI-094 and AI-101 are Ready and the rest Backlog; AI-124 and AI-056 are Blocked on maintainer settings and workflow changes.
 - 2026-09-07 - Added entity filtering to `GET /events`: the listing now takes optional `entity_type` and `entity_id` filters alongside the existing source, type, severity, status and occurrence-window ones, so the platform can fetch every event recorded against one fixture, task or integration rather than paging the whole history and filtering client-side. An entity identifier is only meaningful within its kind, so `entity_id` must be given together with `entity_type` (an `entity_id` on its own is a 422), while `entity_type` alone returns every event about that kind of entity. The filters are exact-match column conditions threaded through the store's `list_events` and `count` so a filtered listing and its total stay in step.
 - 2026-09-06 - Replaced the deprecated Starlette status constants in the API: the webhook and incident-events routers used `HTTP_413_REQUEST_ENTITY_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_ENTITY`, which Starlette renamed to `HTTP_413_CONTENT_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_CONTENT` and now warns on. The routers use the current names, so the service's own code no longer emits a deprecation warning. The numeric codes (413, 422) are unchanged, so the responses are identical and the existing endpoint tests still pin them.
@@ -2611,7 +2631,6 @@ it is not picked up and left half-finished.
 - 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
 - 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
 - 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
-- 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
 
 ## Future Game Center Integration
 
