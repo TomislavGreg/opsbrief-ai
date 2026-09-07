@@ -236,14 +236,19 @@ produced it.
   database or a later read. The match is deterministic and rule-based, the key
   is kept so the masking is visible rather than silent, and the built-in term
   set is widened per deployment through `OPSBRIEF_REDACT_METADATA_KEYS`.
-- Configurable AI context exclusion: a deployment can name event fields that are
-  held back from the plain-text material a model is shown, on top of what
-  redaction masks at storage. An excluded field is replaced by a visible
-  `[excluded]` marker in the daily-brief and incident-summary material, so the
-  model never sees it, while the deterministic picture a reader acts on (the
-  risks, the source event IDs, the span) is unchanged. The fields are chosen
-  through `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS` and validated against the
-  renderable set, so an unknown field fails loudly rather than leaking silently.
+- Configurable AI context exclusion across all prompt material: a deployment can
+  name event fields that are held back from the plain-text material a model is
+  shown, on top of what redaction masks at storage. An excluded field is replaced
+  by a visible `[excluded]` marker wherever it reaches the model, not only in a
+  plain event line: excluding `subject` also holds back the risk titles and the
+  incident title phrased from it, and excluding `occurred_at` also holds back the
+  incident span derived from event occurrence, so a held-back field cannot leak
+  through derived prose. A separate `incident_free_text` control holds back an
+  incident's free-form title and resolution note, which are operator text rather
+  than event fields. The deterministic picture a reader acts on (the risks, the
+  source event IDs, the span) is unchanged. The names are chosen through
+  `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS` and validated, so an unknown name fails
+  loudly rather than leaking silently.
 - Source references on generated output: alongside the flat `source_event_ids` a
   daily brief and an incident summary already carry, each generated output now
   resolves every cited id to a compact `SourceReference` describing what the event
@@ -1369,20 +1374,43 @@ field was present and withheld rather than silently dropped.
 OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS="subject, source"
 ```
 
-The excludable fields are exactly those the brief and incident renderers describe
-an event with: `source`, `event_type`, `subject`, `severity`, `status` and
-`occurred_at`. An event's `id` and `metadata` are never rendered into that
+The excludable event fields are exactly those the brief and incident renderers
+describe an event with: `source`, `event_type`, `subject`, `severity`, `status`
+and `occurred_at`. An event's `id` and `metadata` are never rendered into that
 material, so they are not excludable. A configured name that is not one of these
-is refused when the settings are read, so a misconfiguration fails loudly at
-wiring time rather than leaving a field the operator meant to hold back in the
-model's view. The setting applies to both the daily brief (through `GET /brief`
-and the `opsbrief` command) and incident summaries.
+(or the `incident_free_text` control below) is refused when the settings are read,
+so a misconfiguration fails loudly at wiring time rather than leaving a field the
+operator meant to hold back in the model's view. The setting applies to both the
+daily brief (through `GET /brief` and the `opsbrief` command) and incident
+summaries.
 
-Exclusion narrows the recent-events view a model is shown, not the risks. A risk
-title is a deterministic, rule-produced statement, not a raw event field, so it
-is carried through unchanged: a reader acts on risks, and they are the point of
-the brief. To keep a detail out of both, keep it in `metadata` where redaction
-masks it, rather than in a field a rule reads.
+An excluded field is held back wherever it reaches the model, not only in a plain
+event line. Because a risk title is phrased from the event `subject` behind it (for
+example "<subject> is overdue"), excluding `subject` also holds back the risk
+titles in the brief and the incident title an incident declared from a risk carries;
+the rule and the cited event ids stay, so the model still knows a risk of that kind
+stands. Excluding `occurred_at` also holds back the incident span, which is derived
+from event occurrence. A held-back value is replaced as a whole unit with the
+`[excluded]` placeholder; the material is never scanned for the value and rewritten,
+which would be brittle and could miss a transformed copy.
+
+An incident's title and resolution note can be free-form operator text rather than
+values derived from an event, so field exclusion does not reach them on its own. A
+deployment that must keep that operator text out of a model's view names the
+separate `incident_free_text` control, which holds back both the incident title and
+the resolution note:
+
+```bash
+OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS="subject, occurred_at, incident_free_text"
+```
+
+It is an opt-out: by default the free-form text is shown, because it is authorised
+operational content. Throughout, the risks, the source event IDs, the span and the
+rest of the deterministic structured output a reader acts on are unchanged; only the
+material the model is shown is narrowed. Changing what the model is shown is a change
+of prompt, so the brief and incident-summary prompt versions were bumped when these
+derived surfaces came under exclusion. To keep a detail out of the model's view
+regardless, keep it in `metadata`, where redaction masks it before storage.
 
 ## Source References
 
@@ -2447,7 +2475,7 @@ dashboard evidence links.
 | AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
 | AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Done |
 | AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Backlog |
-| AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Ready |
+| AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Backlog |
 | AI-096 | Make incident mutations atomic | Correctness and safety | Backlog |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Backlog |
@@ -2617,6 +2645,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-07 - Extended AI context exclusion to cover all prompt material (AI-094): an excluded field was masked in the plain event and timeline lines but still reached the model through prose derived from it, so excluding `subject` left it visible in the risk titles and in an incident title declared from a risk, and excluding `occurred_at` left it visible in the incident span. Those derived surfaces are now held back as whole units (never scanned and rewritten), so a held-back field cannot leak through them. Added a separate `incident_free_text` opt-out control that holds back an incident's free-form title and resolution note, which are operator text rather than event fields. The deterministic structured output is unchanged; the brief and incident-summary prompt versions were bumped because the material a model is shown changed. Added unit and end-to-end capturing-fake regressions across both generation paths.
 - 2026-09-07 - Evaluated work by its current state in the overdue and blocked rules (AI-092): events that name a stable entity (a source with an entity type and id) are grouped and only the entity's most recent event, its current state, is judged. A later resolved or cancelled event now clears the earlier blocked or overdue risk, a later deadline replaces an earlier one, and repeated reports of the same work raise one risk rather than one each. This makes the rules honour the integration contract, that a later state change for the same entity id clears a situation, which the per-event rules did not. Events that name no entity are still judged individually, and the whole history stays stored as evidence. Added a work-state projection module, unit tests and a table-driven behavioural suite through risk reporting and a generated brief.
 - 2026-09-07 - Opened Phases 8 through 10 from a full-codebase review: added tickets AI-092 through AI-127 to the board, grouped under Correctness and safety, Efficiency and reporting, and Reliability, tests and operations, and put their full bodies (evidence, intended change, acceptance criteria) in `docs/tickets.md`. The tickets are real defects and gaps found by inspection and adversarial probing, chiefly around clearing resolved work from risks, keeping AI exclusions over derived prompt text, atomic incident mutations, stable whole-history reads and request-size limits. At intake AI-092, AI-094 and AI-101 are Ready and the rest Backlog; AI-124 and AI-056 are Blocked on maintainer settings and workflow changes.
 - 2026-09-07 - Added entity filtering to `GET /events`: the listing now takes optional `entity_type` and `entity_id` filters alongside the existing source, type, severity, status and occurrence-window ones, so the platform can fetch every event recorded against one fixture, task or integration rather than paging the whole history and filtering client-side. An entity identifier is only meaningful within its kind, so `entity_id` must be given together with `entity_type` (an `entity_id` on its own is a 422), while `entity_type` alone returns every event about that kind of entity. The filters are exact-match column conditions threaded through the store's `list_events` and `count` so a filtered listing and its total stay in step.
@@ -2630,7 +2659,6 @@ it is not picked up and left half-finished.
 - 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
 - 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
 - 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
-- 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
 
 ## Future Game Center Integration
 
