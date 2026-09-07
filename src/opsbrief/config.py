@@ -78,8 +78,10 @@ class Settings(BaseSettings):
 
         ``OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS`` names them as a comma-separated
         list; an empty setting excludes nothing. Each name must be one of
-        :data:`~opsbrief.exclusion.EXCLUDABLE_CONTEXT_FIELDS`, so an unknown field
-        is refused here rather than silently ignored.
+        :data:`~opsbrief.exclusion.EXCLUDABLE_CONTEXT_NAMES` (an event field, or the
+        ``incident_free_text`` control that holds back an incident's free-form title
+        and resolution note), so an unknown name is refused here rather than
+        silently ignored.
         """
         return normalise_excluded_fields(self.ai_context_excluded_fields.split(","))
 

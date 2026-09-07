@@ -5,7 +5,11 @@ import pytest
 from opsbrief.exclusion import (
     EXCLUDABLE_CONTEXT_FIELDS,
     EXCLUSION_PLACEHOLDER,
+    INCIDENT_FREE_TEXT_CONTROL,
     normalise_excluded_fields,
+    shown_free_text,
+    shown_incident_title,
+    shown_risk_title,
     shown_value,
 )
 
@@ -47,3 +51,38 @@ def test_shown_value_keeps_an_included_field() -> None:
 
 def test_shown_value_keeps_everything_when_nothing_is_excluded() -> None:
     assert shown_value("subject", "Steward shift is short", frozenset()) == "Steward shift is short"
+
+
+def test_normalise_accepts_the_free_text_control() -> None:
+    assert normalise_excluded_fields([INCIDENT_FREE_TEXT_CONTROL]) == {INCIDENT_FREE_TEXT_CONTROL}
+
+
+def test_risk_title_is_held_back_when_subject_is_excluded() -> None:
+    assert shown_risk_title("Inspection is overdue", {"subject"}) == EXCLUSION_PLACEHOLDER
+
+
+def test_risk_title_is_shown_when_subject_is_included() -> None:
+    assert shown_risk_title("Inspection is overdue", {"status"}) == "Inspection is overdue"
+
+
+def test_incident_title_is_held_back_when_subject_is_excluded() -> None:
+    assert shown_incident_title("Ticketing failing", {"subject"}) == EXCLUSION_PLACEHOLDER
+
+
+def test_incident_title_is_held_back_under_the_free_text_control() -> None:
+    assert (
+        shown_incident_title("Ticketing failing", {INCIDENT_FREE_TEXT_CONTROL})
+        == EXCLUSION_PLACEHOLDER
+    )
+
+
+def test_incident_title_is_shown_by_default() -> None:
+    assert shown_incident_title("Ticketing failing", frozenset()) == "Ticketing failing"
+
+
+def test_resolution_note_is_held_back_only_under_the_free_text_control() -> None:
+    assert (
+        shown_free_text("Restarted the sync", {INCIDENT_FREE_TEXT_CONTROL}) == EXCLUSION_PLACEHOLDER
+    )
+    # A field exclusion does not reach operator free text.
+    assert shown_free_text("Restarted the sync", {"subject"}) == "Restarted the sync"
