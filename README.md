@@ -57,7 +57,8 @@ produced it.
   a secret is configured, so an unconfigured deployment never takes an
   unauthenticated write.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
-  source, type, severity or status, narrowed to an occurrence-time window with
+  source, type, severity or status, narrowed to a single entity with
+  `entity_type` and `entity_id` or to an occurrence-time window with
   `occurred_from` and `occurred_to`, and paginated with `limit` and `offset`.
 - A `GET /events/{event_id}` endpoint that returns a single stored event, or
   404 when no event carries that identifier.
@@ -580,9 +581,21 @@ matches, so a caller can tell whether more pages remain:
 ```
 
 Every filter (`source`, `event_type`, `severity`, `status`) is optional and
-matches its field exactly. `occurred_from` and `occurred_to` narrow the listing
-to events that occurred within an inclusive time window, so a caller can ask for
-just a match day or the last hour rather than paging the whole history:
+matches its field exactly. `entity_type` and `entity_id` narrow the listing to
+events about one thing, so a caller can ask for everything recorded against a
+fixture, a task or an integration rather than paging the whole history:
+
+```bash
+curl 'http://127.0.0.1:8000/events?entity_type=fixture&entity_id=4821'
+```
+
+An entity identifier is only meaningful within its kind, so `entity_id` must be
+given together with `entity_type`; `entity_id` on its own is rejected. Given
+alone, `entity_type` returns every event about that kind of entity.
+
+`occurred_from` and `occurred_to` narrow the listing to events that occurred
+within an inclusive time window, so a caller can ask for just a match day or the
+last hour:
 
 ```bash
 curl 'http://127.0.0.1:8000/events?occurred_from=2026-07-29T00:00:00Z&occurred_to=2026-07-29T23:59:59Z'
@@ -2340,7 +2353,7 @@ started only once the API and core services are stable.
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-083 | Filter listed events by occurrence time | Event ingestion | Done |
-| AI-091 | Filter listed events by entity | Event ingestion | In Progress |
+| AI-091 | Filter listed events by entity | Event ingestion | Done |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
@@ -2499,7 +2512,12 @@ a maintenance follow-up: Starlette renamed the `413` and `422` status constants 
 the old names, so the webhook and incident-events routers now use the current
 `HTTP_413_CONTENT_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_CONTENT`. The numeric codes are
 unchanged, so the responses and their tests are unaffected; the service's own code just no
-longer emits a deprecation warning.
+longer emits a deprecation warning. AI-091 carries the entity dimension into the event read
+path the same way AI-083 carried the occurrence window: `GET /events` now takes optional
+`entity_type` and `entity_id` filters, so the platform can fetch every event recorded against
+one fixture, task or integration rather than paging the whole history. An entity identifier is
+only meaningful within its kind, so `entity_id` must accompany `entity_type` (an `entity_id`
+on its own is a 422), matching the pairing the event contract already enforces on a submission.
 
 ### Maintaining the CI workflow
 
@@ -2510,6 +2528,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-07 - Added entity filtering to `GET /events`: the listing now takes optional `entity_type` and `entity_id` filters alongside the existing source, type, severity, status and occurrence-window ones, so the platform can fetch every event recorded against one fixture, task or integration rather than paging the whole history and filtering client-side. An entity identifier is only meaningful within its kind, so `entity_id` must be given together with `entity_type` (an `entity_id` on its own is a 422), while `entity_type` alone returns every event about that kind of entity. The filters are exact-match column conditions threaded through the store's `list_events` and `count` so a filtered listing and its total stay in step.
 - 2026-09-06 - Replaced the deprecated Starlette status constants in the API: the webhook and incident-events routers used `HTTP_413_REQUEST_ENTITY_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_ENTITY`, which Starlette renamed to `HTTP_413_CONTENT_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_CONTENT` and now warns on. The routers use the current names, so the service's own code no longer emits a deprecation warning. The numeric codes (413, 422) are unchanged, so the responses are identical and the existing endpoint tests still pin them.
 - 2026-09-06 - Added severity and rule filtering to `GET /risks`: the endpoint now takes optional `severity` and `rule` query parameters, so a caller can poll just the critical risks, or only those from one rule, rather than fetching the whole snapshot and filtering client-side. The filters are threaded through a `RiskQuery` model and applied after the risks are ranked, so they never change detection or the order of what remains, and an omitted filter returns the whole picture as before. `generated_at` still records the instant the whole snapshot was judged against. The endpoint now validates its parameters, so an unknown severity or a stray parameter is a 422 rather than silently ignored. This completes the read-path filtering AI-083 and AI-084 began for the event and incident listings.
 - 2026-09-05 - Added a suggested-next-actions panel to the dashboard: `GET /dashboard` now renders the brief's suggested next actions inline below the active risks, one per active risk in the same priority order, so a duty manager sees not just what the risks are but what to do about them. Each action shows the risk's severity as a badge, the recommended step, the risk it addresses, the rule behind it and the source events it traces to, carried straight from the brief's deterministic actions so a suggestion traces to the same evidence as its risk and no model decides it. No active risks shows the same all-clear empty state the risks panel does, and every field is escaped as it is placed.
@@ -2523,7 +2542,6 @@ it is not picked up and left half-finished.
 - 2026-08-31 - Added an incident-summary endpoint, `GET /incidents/{incident_id}/summary`: it resolves a tracked incident's cited events against the whole event history into a timeline and returns the current incident summary, phrasing the deterministic picture (status, severity, span, source event IDs, references and any cited id that no longer resolves) with the configured provider the same way `GET /brief` phrases the daily brief. Only the summary comes from a model and it is constrained as untrusted output, so a provider outage degrades the summary rather than failing the request, and a missing incident is answered with 404. The AI incident summary the service has generated since AI-043 is now readable over HTTP, not only shown on the dashboard.
 - 2026-08-30 - Added suggested next actions to the daily brief: every brief now carries one deterministic `next_action` per risk, in the same priority order, each the canonical recommended step for the rule that raised the risk and carrying that risk's title, severity and source event IDs. No model decides them, so an action traces back to the same evidence as its risk; a rule with no canonical action yet falls back to a generic review step. They surface on `GET /brief` (output version now `daily-brief/4`) and in the `opsbrief` text output. This makes real the suggested next actions the overview and Phase 3 always described.
 - 2026-08-30 - Added a public demo-data mode: when `OPSBRIEF_DEMO_DATA` is true the service seeds a fresh (empty) store on startup with the synthetic match-day fixture and the worked quality-control incident declared over it, so a public demo shows a populated dashboard (recent events, active risks, a daily brief and a tracked incident with a timeline) without anyone posting events first. Seeding runs only when the event store holds no events, so it never touches a store that already carries real data and never seeds twice across restarts, and defaults off. This completes Phase 7.
-- 2026-08-29 - Added an incidents panel to the dashboard: `GET /dashboard` now reads the most recently opened tracked incidents (the same way `GET /incidents` does) and renders each inline with its status and severity as badges and its timeline, the cited events laid out oldest first (the same way `build_incident_timeline` orders them) resolved against the whole event history at request time. A cited id no stored event answers to is named as a gap rather than dropped, no tracked incidents shows an empty state, and every field is escaped as it is placed.
 
 ## Future Game Center Integration
 
