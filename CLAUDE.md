@@ -75,6 +75,17 @@ docs(readme): record AI-004 as done
 `main` is always green. Changes reach it through a pull request, merged with
 rebase-and-merge so history stays linear.
 
+## Maintenance routine
+
+Development is advanced one ticket at a time from the README Ticket Board. A run
+resumes from the current board and the full ticket bodies in
+[`docs/tickets.md`](docs/tickets.md), not from any earlier session: read the board,
+the dependencies and the acceptance criteria before choosing work, take the
+highest-priority eligible Ready ticket, and do not recreate existing tickets or
+redo Done work without a specific documented regression. The full operating rules
+(selection, the Ready queue, verification, blockers) are in
+[`docs/routine.md`](docs/routine.md).
+
 ## Data policy
 
 This is a public repository. It must never contain private, customer or

@@ -1405,12 +1405,16 @@ OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS="subject, occurred_at, incident_free_text"
 ```
 
 It is an opt-out: by default the free-form text is shown, because it is authorised
-operational content. Throughout, the risks, the source event IDs, the span and the
-rest of the deterministic structured output a reader acts on are unchanged; only the
-material the model is shown is narrowed. Changing what the model is shown is a change
-of prompt, so the brief and incident-summary prompt versions were bumped when these
-derived surfaces came under exclusion. To keep a detail out of the model's view
-regardless, keep it in `metadata`, where redaction masks it before storage.
+operational content. A real-data deployment should exclude `incident_free_text`
+unless sending operator-authored titles and resolution notes to an external
+provider is a deliberate, accepted choice; a synthetic offline demo (the default
+build phrases with the fake provider) may leave it shown. Throughout, the risks,
+the source event IDs, the span and the rest of the deterministic structured output
+a reader acts on are unchanged; only the material the model is shown is narrowed.
+Changing what the model is shown is a change of prompt, so the brief and
+incident-summary prompt versions were bumped when these derived surfaces came under
+exclusion. To keep a detail out of the model's view regardless, keep it in
+`metadata`, where redaction masks it before storage.
 
 ## Source References
 
@@ -2473,16 +2477,16 @@ dashboard evidence links.
 | AI-074 | Display incidents and timelines | Demo interface | Done |
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
 | AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
-| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Done |
+| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Ready |
 | AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Backlog |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Backlog |
-| AI-096 | Make incident mutations atomic | Correctness and safety | Backlog |
+| AI-096 | Make incident mutations atomic | Correctness and safety | Ready |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Backlog |
-| AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Backlog |
+| AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Ready |
 | AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Backlog |
 | AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Backlog |
-| AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Ready |
+| AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Blocked |
 | AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Backlog |
 | AI-103 | Validate configuration at startup and make readiness truthful | Correctness and safety | Backlog |
 | AI-104 | Align input validation with stored and generated output contracts | Correctness and safety | Backlog |
@@ -2513,7 +2517,37 @@ dashboard evidence links.
 Statuses: Backlog, Ready, In Progress, Review, Blocked, Done.
 
 Full bodies for the active tickets (AI-092 onward), with evidence, the intended
-change and acceptance criteria, are in [`docs/tickets.md`](docs/tickets.md).
+change and acceptance criteria, are in [`docs/tickets.md`](docs/tickets.md). The
+routine that advances this board follows [`docs/routine.md`](docs/routine.md): it
+reads the board, dependencies and acceptance criteria before choosing work, takes
+one ticket at a time, and records blockers rather than stalling.
+
+A run selects the highest-priority eligible Ready ticket whose dependencies are all
+Done. After a ticket is completed or blocked, it replenishes a small Ready queue
+from eligible Backlog items so the next run has work ready; a ticket blocked on one
+unavailable tool never stalls unrelated eligible work. The current Ready queue is
+AI-092, AI-096 and AI-098; AI-093 stays Backlog until the corrected AI-092 is Done,
+because it depends on it.
+
+AI-092 was reopened after its first implementation. Grouping work by entity was
+right, but the implementation treats an informational event as a state
+replacement: a status-less comment on a blocked, overdue task wrongly clears both
+risks, and a later "still blocked" report wrongly resets the blocked duration and
+lowers the severity. The corrected fix must preserve known state and continuous
+blocked duration across informational events, and must distinguish an omitted
+deadline from an explicitly removed one rather than ignoring every status-less
+event. The regression scenarios are recorded in the AI-092 body in
+[`docs/tickets.md`](docs/tickets.md); the fix and its tests are for a future run,
+not written yet.
+
+AI-101 (container writable persistent SQLite storage) is Blocked while Docker is
+unavailable to the routine: its acceptance criteria gate on a Docker-enabled run
+(a fresh image starts as the non-root user and passes readiness, an event survives
+a container replacement through a mounted volume), which cannot be verified here.
+It is unblocked by running the routine in a Docker-capable environment, or by the
+maintainer performing the container smoke check; owner: maintainer or a
+Docker-enabled routine environment. The static change is small, but it must not be
+merged unverified.
 
 Phase 4 (Incident intelligence) is complete, and Phase 5 (Safety and
 explainability) is complete apart from automating dependency scanning in CI:
@@ -2645,6 +2679,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-07 - Prepared the board and routine for future runs: reopened AI-092 after finding its work-state implementation treats an informational (status-less, deadline-less) event as a state replacement, wrongly clearing a blocked and overdue task and resetting the blocked duration on a later re-report; recorded those as regression scenarios in the AI-092 body for the next implementation run, with the requirement that informational events preserve known state and continuous blocked duration and that the fix distinguish an omitted deadline from an explicitly removed one. Set AI-092, AI-096 and AI-098 Ready, kept AI-093 dependent on the corrected AI-092, and marked AI-101 Blocked on Docker verification with its owner. Added `docs/routine.md`, a standing routine instruction set (resume from the board and ticket bodies, one ticket at a time, verify on the real PR-head and merged-main commits, record blockers, avoid filler), linked from `CLAUDE.md`, and recorded that real-data deployments should exclude `incident_free_text` (carried to AI-112). No application code changed.
 - 2026-09-07 - Extended AI context exclusion to cover all prompt material (AI-094): an excluded field was masked in the plain event and timeline lines but still reached the model through prose derived from it, so excluding `subject` left it visible in the risk titles and in an incident title declared from a risk, and excluding `occurred_at` left it visible in the incident span. Those derived surfaces are now held back as whole units (never scanned and rewritten), so a held-back field cannot leak through them. Added a separate `incident_free_text` opt-out control that holds back an incident's free-form title and resolution note, which are operator text rather than event fields. The deterministic structured output is unchanged; the brief and incident-summary prompt versions were bumped because the material a model is shown changed. Added unit and end-to-end capturing-fake regressions across both generation paths.
 - 2026-09-07 - Evaluated work by its current state in the overdue and blocked rules (AI-092): events that name a stable entity (a source with an entity type and id) are grouped and only the entity's most recent event, its current state, is judged. A later resolved or cancelled event now clears the earlier blocked or overdue risk, a later deadline replaces an earlier one, and repeated reports of the same work raise one risk rather than one each. This makes the rules honour the integration contract, that a later state change for the same entity id clears a situation, which the per-event rules did not. Events that name no entity are still judged individually, and the whole history stays stored as evidence. Added a work-state projection module, unit tests and a table-driven behavioural suite through risk reporting and a generated brief.
 - 2026-09-07 - Opened Phases 8 through 10 from a full-codebase review: added tickets AI-092 through AI-127 to the board, grouped under Correctness and safety, Efficiency and reporting, and Reliability, tests and operations, and put their full bodies (evidence, intended change, acceptance criteria) in `docs/tickets.md`. The tickets are real defects and gaps found by inspection and adversarial probing, chiefly around clearing resolved work from risks, keeping AI exclusions over derived prompt text, atomic incident mutations, stable whole-history reads and request-size limits. At intake AI-092, AI-094 and AI-101 are Ready and the rest Backlog; AI-124 and AI-056 are Blocked on maintainer settings and workflow changes.
@@ -2658,7 +2693,6 @@ it is not picked up and left half-finished.
 - 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
 - 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
 - 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
-- 2026-08-31 - Added a readiness health check, `GET /health/ready`, distinct from the `GET /health` liveness check: it probes the event and incident stores with a cheap counting query and answers 200 when both are reachable or 503 with the same body when one is not, naming the degraded dependency, so an orchestrator can gate traffic on the stores being reachable rather than only on the process being alive. A probe that fails is captured as a not-ready result rather than raised, so a degraded database is reported as a structured answer instead of a 500. Liveness stays cheap and never touches the database.
 
 ## Future Game Center Integration
 
