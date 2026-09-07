@@ -2340,6 +2340,7 @@ started only once the API and core services are stable.
 | AI-015 | Add single-event retrieval endpoint | Event ingestion | Done |
 | AI-016 | Recognise resubmissions within a batch | Event ingestion | Done |
 | AI-083 | Filter listed events by occurrence time | Event ingestion | Done |
+| AI-091 | Filter listed events by entity | Event ingestion | In Progress |
 | AI-020 | Define explainable risk-rule interface | Risk detection | Done |
 | AI-021 | Detect overdue work | Risk detection | Done |
 | AI-022 | Detect blocked operational work | Risk detection | Done |
