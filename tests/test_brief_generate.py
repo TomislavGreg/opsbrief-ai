@@ -250,10 +250,30 @@ def test_render_context_says_none_when_there_are_no_risks() -> None:
 def test_render_context_holds_back_excluded_event_fields() -> None:
     rendered = render_context(make_context(), excluded_fields={"subject"})
 
-    assert "Safety inspection for North Stand is overdue" not in rendered.split("Recent events")[1]
+    # The excluded subject must not survive anywhere, including in a risk title
+    # phrased from it, not only in the recent-events line.
+    assert "Safety inspection for North Stand is overdue" not in rendered
     assert "[excluded]" in rendered
     # A field that was not excluded is still shown.
     assert "safety inspection.overdue" in rendered
+
+
+def test_render_context_holds_back_a_risk_title_when_subject_is_excluded() -> None:
+    rendered = render_context(make_context(), excluded_fields={"subject"})
+
+    risks_section = rendered.split("Recent events")[0]
+    # The rule and cited event ids stay so the model still knows a risk stands,
+    # but the subject-phrased title is gone.
+    assert "Safety inspection" not in risks_section
+    assert "overdue_work" in risks_section
+    assert "events: e04" in risks_section
+
+
+def test_render_context_keeps_risk_titles_when_subject_is_shown() -> None:
+    rendered = render_context(make_context(), excluded_fields={"severity"})
+
+    # Excluding an unrelated field does not hold back the risk title.
+    assert "Safety inspection for North Stand is overdue" in rendered.split("Recent events")[0]
 
 
 def test_render_context_shows_every_field_when_nothing_is_excluded() -> None:
@@ -268,5 +288,7 @@ def test_excluded_field_is_kept_out_of_the_provider_request() -> None:
     generate_brief(make_context(), provider, excluded_fields={"subject"})
 
     material = provider.requests[0].input
-    assert "Safety inspection for North Stand is overdue" not in material.split("Recent events")[1]
+    # The excluded subject reaches the provider through neither the event line nor
+    # the risk title phrased from it.
+    assert "Safety inspection for North Stand is overdue" not in material
     assert "[excluded]" in material
