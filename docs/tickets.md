@@ -23,11 +23,21 @@ only after the merged result is verified on CI.
 
 ## Dependencies and starting queue
 
-Dependencies below are hard prerequisites, not a suggested reading order. At
-intake, AI-092, AI-094 and AI-101 are Ready; every other new ticket is Backlog;
-AI-124 is Blocked on a maintainer settings action and AI-056 stays Blocked on a
-workflow change. After each merge, promote the highest-priority ticket whose
-dependencies are all Done.
+Dependencies below are hard prerequisites, not a suggested reading order. The
+README board holds the live status of every ticket; this section describes how the
+queue moves, not a snapshot. A run selects the highest-priority eligible Ready
+ticket whose dependencies are all Done. After a ticket is completed or blocked, the
+run replenishes a small Ready queue by promoting the highest-priority eligible
+Backlog items whose dependencies are Done, so the next run has work waiting. A
+ticket blocked on one unavailable tool (for example AI-101 while Docker is
+unavailable) is marked Blocked with the reason and owner and does not stall
+unrelated eligible work.
+
+At the last update the Ready queue was AI-092 (reopened, see its body), AI-096 and
+AI-098; AI-093 stays Backlog until the corrected AI-092 is Done; AI-101 is Blocked
+on Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
+on a workflow change. AI-094 is Done. Read the board, not this paragraph, for the
+current state.
 
 A sensible progression:
 
@@ -51,7 +61,8 @@ rewriting the history.
 
 ### AI-092: Evaluate current work state before raising blocked and overdue risks
 
-Priority P1, Bug, effort M, Routine. Depends on: none. Finding F01.
+Priority P1, Bug, effort M, Routine. Depends on: none. Finding F01. Status: Ready
+(reopened after a partial implementation, see "Reopened" below).
 
 Evidence: a blocked or past-due event followed by a resolved event for the same
 entity still raises both risks. The overdue and blocked rules classify individual
@@ -78,9 +89,43 @@ Acceptance criteria:
 - One table-driven behavioural suite covers those sequences through risk reporting
   and a generated brief. The integration example is updated to match.
 
+Reopened: a first implementation landed (a work-state projection keyed by entity,
+in `opsbrief/risks/work_state.py`, with the overdue and blocked rules judging the
+entity's most recent event). Grouping by entity was the right shape, and the
+clearing sequences above pass, but the implementation treats an informational
+event as a full state replacement. It uses the single most recent event as the
+current state, so any later event, even one that carries no status and no deadline,
+overwrites the known state. Two defects follow, and both must become regressions in
+the next implementation session before the fix:
+
+- A task blocked for 48 hours with a past-due deadline correctly raises two
+  high-severity risks (blocked and overdue). A later informational event for the
+  same entity that carries no `status` and no `due_at` (for example a progress
+  comment) wrongly clears both risks, because it becomes the current state and it is
+  neither blocked nor past due. An informational event must preserve the known
+  state, not erase it: the task is still blocked and still overdue.
+- After that, a genuine "still blocked" report for the same entity wrongly resets
+  the blocked duration to that report's time and lowers the severity from high back
+  to medium, because duration is measured from the latest blocked event rather than
+  from when the current unbroken block began. A re-affirmation of an existing block
+  must not reset the continuous blocked duration or reduce severity.
+
+Clarify for the fix: an event that carries neither a `status` nor a `due_at`
+(nor any other field a rule reads) is informational and must leave the entity's
+known state and its continuous blocked duration unchanged, rather than being taken
+as the new current state. This is not a licence to ignore every status-less event:
+the fix must distinguish a deadline that is simply omitted on an update (the prior
+deadline still stands) from one a producer explicitly removes or replaces, and
+must define that distinction rather than dropping every status-less event blindly.
+Preserve the passing clearing behaviour and the immutable-history and
+repeated-integration-failure guarantees. Do not write the fix or its tests in the
+planning update that recorded this; they belong to a future implementation run.
+
 ### AI-093: Apply one evaluation instant and normalise iterable rule inputs
 
-Priority P1, Bug, effort M, Routine. Depends on: AI-092. Finding F02.
+Priority P1, Bug, effort M, Routine. Depends on: the corrected AI-092 (Done).
+Finding F02. Stays Backlog until AI-092 is Done again, since it builds on the same
+work-state path.
 
 Evidence: a future recovery clears three current integration failures; future
 work enters today's context. The equal-time recovery prose disagrees with its
@@ -107,6 +152,11 @@ Acceptance criteria:
 ### AI-094: Enforce AI exclusions across all prompt material
 
 Priority P1, Privacy bug, effort M, Routine. Depends on: none. Finding F03.
+Status: Done. The masking, including the `incident_free_text` opt-out, is kept.
+Deployment note: a real-data deployment should exclude `incident_free_text` unless
+sending operator-authored titles and notes to an external provider is a deliberate
+choice; the requirement to enforce that when a real provider is configured is
+carried to AI-112.
 
 Evidence: with `subject` excluded, an excluded marker still reaches the brief
 prompt through a risk title, and the incident prompt through an incident title
@@ -277,6 +327,15 @@ Acceptance criteria:
 ### AI-101: Give the container writable persistent SQLite storage
 
 Priority P1, Deployment bug, effort S, Routine. Depends on: none. Finding F09.
+Status: Blocked while Docker is unavailable to the routine.
+
+Blocker: the acceptance criteria gate on a Docker-enabled run (a fresh image
+starts as the non-root user and passes readiness, an ingested event survives a
+container replacement through a mounted volume). The routine's environment has no
+Docker, so the static Dockerfile, Compose and default-path change cannot be
+verified and must not be merged unverified. Owner to unblock: the maintainer
+running the container smoke check, or the routine running in a Docker-capable
+environment. Once verification is possible, move it back to Ready.
 
 Evidence: the image creates and copies `/app` as root, then switches to UID 1000;
 the default database URL is relative and no writable data directory is created for
@@ -558,6 +617,16 @@ Acceptance criteria:
 - Provider and model identity, usage where available and versions reach the audit.
   The UI distinguishes model narrative from verified structured results, and a
   failure preserves deterministic output.
+- Free-text policy (carried from AI-094): when this adapter sends real prompts to an
+  external provider, a real-data deployment must exclude `incident_free_text` so an
+  incident's operator-authored title and resolution note are held back, unless
+  sending that operator text to the provider is a deliberate, accepted choice. The
+  masking already exists (AI-094); this ticket must document the requirement where an
+  operator configures the real provider (the provider setup docs and any example
+  configuration) and default its examples to excluding `incident_free_text`. A
+  synthetic offline demo, phrasing with the fake provider, may leave it shown. This
+  is a documentation and configuration-default requirement, not a runtime-behaviour
+  change to the masking.
 
 ### AI-113: Add reporting periods, source freshness and changes since a prior brief
 
@@ -805,6 +874,18 @@ Acceptance criteria:
 ### AI-123: Give the routines explicit ticket selection, completion and stop rules
 
 Priority P2, Automation/maintenance, effort M, Routine and maintainer. Depends on: AI-122. Finding F24.
+
+Progress: the in-repo half of this ticket is drafted. The reusable routine
+instruction set is [`docs/routine.md`](routine.md), linked from `CLAUDE.md`, and
+covers selection, the Ready queue, one-ticket-at-a-time work, verification on the
+actual PR-head and merged-main commits, marking Done only after verification,
+respecting permissions and recording blockers, and avoiding filler commits and
+repetitive progress narratives. What remains keeps this ticket open: the external
+routine configuration (the scheduled prompt the run fires from) must be reconciled
+with `docs/routine.md` by its owner, and the maintainer must confirm the live
+routine implements these rules and respects the workflow and settings permissions.
+A prepared instruction file in the repository does not by itself certify the unseen
+live routine.
 
 Evidence: an exhausted board, frequent status-related commit subjects and the
 documented workflow permission blocker. The external live routine definitions were
