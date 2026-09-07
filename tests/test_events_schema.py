@@ -213,6 +213,8 @@ def test_event_query_defaults_to_an_unfiltered_first_page() -> None:
     assert query.event_type is None
     assert query.severity is None
     assert query.status is None
+    assert query.entity_type is None
+    assert query.entity_id is None
     assert query.limit == DEFAULT_PAGE_SIZE
     assert query.offset == 0
 
@@ -227,6 +229,20 @@ def test_event_query_parses_filters_and_pagination() -> None:
     assert query.status is EventStatus.BLOCKED
     assert query.limit == 10
     assert query.offset == 20
+
+
+def test_event_query_parses_entity_filters() -> None:
+    query = EventQuery(entity_type="fixture", entity_id="4821")
+
+    assert query.entity_type == "fixture"
+    assert query.entity_id == "4821"
+
+
+def test_event_query_allows_entity_type_without_entity_id() -> None:
+    query = EventQuery(entity_type="fixture")
+
+    assert query.entity_type == "fixture"
+    assert query.entity_id is None
 
 
 def test_event_query_normalises_occurrence_bounds_to_utc() -> None:
@@ -259,6 +275,9 @@ def test_event_query_allows_an_equal_occurrence_window() -> None:
         {"occurred_from": "2026-07-29T09:30:00"},
         {"occurred_to": "not-a-timestamp"},
         {"occurred_from": "2026-07-29T18:00:00Z", "occurred_to": "2026-07-29T09:30:00Z"},
+        {"entity_id": "4821"},
+        {"entity_type": ""},
+        {"entity_type": "fixture", "entity_id": ""},
     ],
 )
 def test_event_query_rejects_invalid_input(overrides: dict[str, object]) -> None:

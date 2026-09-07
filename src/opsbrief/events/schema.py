@@ -251,6 +251,22 @@ class EventQuery(BaseModel):
         default=None,
         description="Return only events in this state.",
     )
+    entity_type: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Return only events about this kind of entity, for example 'fixture'.",
+    )
+    entity_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description=(
+            "Return only events about the entity with this identifier. An entity "
+            "identifier is only meaningful within its kind, so entity_id must be "
+            "given together with entity_type."
+        ),
+    )
     occurred_from: datetime | None = Field(
         default=None,
         description="Return only events at or after this time. Must carry a timezone offset.",
@@ -284,6 +300,12 @@ class EventQuery(BaseModel):
             and self.occurred_from > self.occurred_to
         ):
             raise ValueError("occurred_from must not be later than occurred_to")
+        return self
+
+    @model_validator(mode="after")
+    def _check_entity_filter(self) -> "EventQuery":
+        if self.entity_id is not None and self.entity_type is None:
+            raise ValueError("entity_id filter must be given together with entity_type")
         return self
 
 
