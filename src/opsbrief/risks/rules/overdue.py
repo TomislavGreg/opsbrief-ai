@@ -6,6 +6,15 @@ states in which a deadline no longer matters. Anything else with a past
 ``due_at`` — open, in progress, blocked, failed, already flagged overdue by its
 producer — still counts, because the work it describes was not done in time.
 
+A producer reports the same work more than once as its state changes. Events that
+name a stable entity (a source with an ``entity_type`` and ``entity_id``) are
+grouped, and only the entity's current state, its most recent event, is judged:
+a later resolved or cancelled event clears the earlier deadline, and a later
+deadline replaces an earlier one, so work that has since been finished or
+rescheduled stops being reported. Events that name no entity cannot be correlated
+across reports, so each is judged on its own. The whole history stays stored as
+evidence either way. See :mod:`opsbrief.risks.work_state`.
+
 The judgement is made against a reference instant rather than the wall clock, so
 the same events and the same instant always classify the same way. That keeps
 detection deterministic and lets a test pin the boundary exactly.
@@ -14,11 +23,9 @@ detection deterministic and lets a test pin the boundary exactly.
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from opsbrief.events import Event, EventStatus, as_utc
+from opsbrief.events import Event, as_utc
 from opsbrief.risks.schema import Risk, RiskSeverity
-
-#: States in which a deadline no longer matters, so passing it raises no risk.
-TERMINAL_STATUSES = frozenset({EventStatus.RESOLVED, EventStatus.CANCELLED})
+from opsbrief.risks.work_state import TERMINAL_STATUSES, group_work
 
 #: Identifier the overdue rule tags its risks with.
 RULE_ID = "overdue_work"
@@ -68,8 +75,16 @@ class OverdueWorkRule:
         self._now = as_utc(now)
 
     def evaluate(self, events: Sequence[Event]) -> list[Risk]:
-        """Return one risk per overdue event, most overdue first."""
-        overdue = [event for event in events if is_overdue_work(event, self._now)]
+        """Return one risk per overdue work item, most overdue first.
+
+        Each tracked entity contributes at most one risk, judged on its current
+        state, so a piece of work that was resolved or rescheduled no longer shows
+        as overdue and repeated reports of the same work do not each raise a risk.
+        Events that name no entity are judged individually, as before.
+        """
+        states, unkeyed = group_work(events)
+        overdue = [state.current for state in states if is_overdue_work(state.current, self._now)]
+        overdue += [event for event in unkeyed if is_overdue_work(event, self._now)]
         overdue.sort(key=lambda event: (event.due_at, event.id))
         return [self._risk(event) for event in overdue]
 
