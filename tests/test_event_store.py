@@ -383,6 +383,27 @@ def test_listing_filters_combine_and_page_together(store: EventStore) -> None:
     ]
 
 
+def test_listing_filters_by_entity_type(store: EventStore) -> None:
+    store.add(make_event(entity_type="fixture", entity_id="4821"))
+    store.add(make_event(entity_type="task", entity_id="4821"))
+
+    listed = store.list_events(entity_type="fixture")
+
+    assert [event.entity_type for event in listed] == ["fixture"]
+
+
+def test_listing_filters_by_entity_type_and_id(store: EventStore) -> None:
+    store.add(make_event(entity_type="fixture", entity_id="4821"))
+    store.add(make_event(entity_type="fixture", entity_id="4822"))
+    store.add(make_event(entity_type="task", entity_id="4821"))
+
+    listed = store.list_events(entity_type="fixture", entity_id="4821")
+
+    assert len(listed) == 1
+    assert listed[0].entity_type == "fixture"
+    assert listed[0].entity_id == "4821"
+
+
 def test_count_respects_filters(store: EventStore) -> None:
     store.add(make_event(source="integrations", severity="high"))
     store.add(make_event(source="integrations", severity="low"))
@@ -392,6 +413,16 @@ def test_count_respects_filters(store: EventStore) -> None:
     assert store.count(source="integrations") == 2
     assert store.count(severity=EventSeverity.HIGH) == 2
     assert store.count(source="integrations", severity=EventSeverity.HIGH) == 1
+
+
+def test_count_respects_entity_filters(store: EventStore) -> None:
+    store.add(make_event(entity_type="fixture", entity_id="4821"))
+    store.add(make_event(entity_type="fixture", entity_id="4822"))
+    store.add(make_event(entity_type="task", entity_id="4821"))
+
+    assert store.count(entity_type="fixture") == 2
+    assert store.count(entity_type="fixture", entity_id="4821") == 1
+    assert store.count(entity_type="task") == 1
 
 
 def test_listing_filters_by_occurrence_window(store: EventStore) -> None:
