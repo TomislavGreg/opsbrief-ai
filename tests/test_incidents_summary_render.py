@@ -126,3 +126,59 @@ def test_render_shows_every_field_when_nothing_is_excluded() -> None:
     rendered = render_incident_material(incident, build_incident_timeline(incident, events))
 
     assert "[excluded]" not in rendered
+
+
+def test_render_holds_back_the_incident_title_when_subject_is_excluded() -> None:
+    # An incident declared from a risk carries a subject-phrased title, so an
+    # excluded subject must not survive through it.
+    events = [make_event("e1", minutes_ago=20)]
+    incident = make_incident(["e1"], title="Pitch inspection for South Stand is overdue")
+
+    rendered = render_incident_material(
+        incident, build_incident_timeline(incident, events), excluded_fields={"subject"}
+    )
+
+    assert "Pitch inspection for South Stand is overdue" not in rendered
+    assert "Incident: [excluded]" in rendered
+
+
+def test_render_holds_back_the_span_when_occurred_at_is_excluded() -> None:
+    events = [make_event("e1", minutes_ago=90), make_event("e2", minutes_ago=10)]
+    incident = make_incident(["e1", "e2"])
+
+    rendered = render_incident_material(
+        incident, build_incident_timeline(incident, events), excluded_fields={"occurred_at"}
+    )
+
+    assert "Span: [excluded]" in rendered
+    assert (NOW - timedelta(minutes=90)).isoformat() not in rendered
+
+
+def test_render_holds_back_free_text_under_the_control() -> None:
+    events = [make_event("e1", minutes_ago=20)]
+    incident = make_incident(["e1"], title="Sensitive incident name").transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="Called the on-site engineer by name."
+    )
+
+    rendered = render_incident_material(
+        incident,
+        build_incident_timeline(incident, events),
+        excluded_fields={"incident_free_text"},
+    )
+
+    assert "Sensitive incident name" not in rendered
+    assert "Called the on-site engineer by name." not in rendered
+    assert "Incident: [excluded]" in rendered
+    assert "Resolution: [excluded]" in rendered
+
+
+def test_render_keeps_free_text_by_default() -> None:
+    events = [make_event("e1", minutes_ago=20)]
+    incident = make_incident(["e1"]).transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="Restarted the ticketing sync."
+    )
+
+    rendered = render_incident_material(incident, build_incident_timeline(incident, events))
+
+    assert "Incident: Ticketing integration failing repeatedly" in rendered
+    assert "Resolution: Restarted the ticketing sync." in rendered

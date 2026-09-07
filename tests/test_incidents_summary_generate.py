@@ -72,6 +72,76 @@ def test_excluded_fields_are_held_back_from_the_provider() -> None:
     assert "[excluded]" in material
 
 
+def test_excluded_subject_marker_never_reaches_the_provider_through_any_surface() -> None:
+    # One distinctive marker placed in the subject and the derived incident title;
+    # excluding the subject must keep it out of every part of the prompt.
+    marker = "SUBJECT-SECRET-9137"
+    provider = FakeAIProvider()
+    incident = make_incident(["e1"], title=f"{marker} is overdue")
+    events = [make_event("e1", minutes_ago=20, subject=f"{marker} did not report")]
+
+    generate_incident_summary(incident, events, provider, excluded_fields={"subject"})
+
+    assert marker not in provider.requests[0].input
+
+
+def test_excluded_occurred_at_marker_never_reaches_the_provider_through_the_span() -> None:
+    provider = FakeAIProvider()
+    incident = make_incident(["e1", "e2"])
+    events = [make_event("e1", minutes_ago=90), make_event("e2", minutes_ago=10)]
+
+    generate_incident_summary(incident, events, provider, excluded_fields={"occurred_at"})
+
+    material = provider.requests[0].input
+    assert (NOW - timedelta(minutes=90)).isoformat() not in material
+
+
+def test_free_text_control_keeps_the_note_and_title_from_the_provider() -> None:
+    provider = FakeAIProvider()
+    incident = make_incident(["e1"], title="Named person incident").transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="Paged engineer Jane Doe."
+    )
+    events = [make_event("e1", minutes_ago=20)]
+
+    generate_incident_summary(incident, events, provider, excluded_fields={"incident_free_text"})
+
+    material = provider.requests[0].input
+    assert "Named person incident" not in material
+    assert "Paged engineer Jane Doe." not in material
+
+
+def test_several_exclusions_together_all_apply() -> None:
+    provider = FakeAIProvider()
+    incident = make_incident(["e1"], title="SECRET-TITLE").transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="SECRET-NOTE"
+    )
+    events = [make_event("e1", minutes_ago=20, subject="SECRET-SUBJECT")]
+
+    generate_incident_summary(
+        incident,
+        events,
+        provider,
+        excluded_fields={"subject", "occurred_at", "source", "incident_free_text"},
+    )
+
+    material = provider.requests[0].input
+    for marker in ("SECRET-TITLE", "SECRET-NOTE", "SECRET-SUBJECT", "integrations"):
+        assert marker not in material
+    assert (NOW - timedelta(minutes=20)).isoformat() not in material
+
+
+def test_no_exclusions_shows_all_material() -> None:
+    provider = FakeAIProvider()
+    incident = make_incident(["e1"]).transition_to(
+        IncidentStatus.RESOLVED, at=NOW, note="Restarted the sync."
+    )
+    events = [make_event("e1", minutes_ago=20)]
+
+    generate_incident_summary(incident, events, provider)
+
+    assert "[excluded]" not in provider.requests[0].input
+
+
 def test_structured_facts_are_carried_from_the_incident_not_the_model() -> None:
     provider = FakeAIProvider(responses=["Anything here is only phrasing."])
     incident = make_incident(["e1", "e2"], severity=IncidentSeverity.CRITICAL)
