@@ -100,9 +100,17 @@ is recognised:
   integration comes back.
 
 Sending a later `resolved` (or `shift.filled`, `task.completed`) event for the same
-`entity_id` is how the platform tells OpsBrief AI a situation has cleared. The risk
-picture is recomputed from the current events every time it is read, so a cleared
-situation stops being reported.
+`entity_id` is how the platform tells OpsBrief AI a situation has cleared. The
+overdue and blocked rules judge each tracked entity by its current state, its most
+recent event: a later `resolved` or `cancelled` event clears the earlier risk, and
+a later `due_at` replaces an earlier deadline. Give each piece of work a stable
+`entity_type` and `entity_id` and send its state changes under that id, so the
+service can tell that a resolution refers to the same work. Two events sharing an
+id are treated as the same work; a `resolved` event for the fixture, task or
+integration id clears the risk raised against it. An event that carries no entity
+pair cannot be correlated with a later one, so its risk stays until the window it
+falls in passes. The risk picture is recomputed from the current events every time
+it is read, so a cleared situation stops being reported.
 
 Sensitive and personal data must not be sent. This is a public project (see
 [`../SECURITY.md`](../SECURITY.md)); keep anything sensitive in `metadata`, where a
