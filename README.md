@@ -91,11 +91,17 @@ produced it.
   with or without a deadline, escalating from medium to high once the work has
   been blocked for at least a day, longest blocked first.
 - Entity-aware evaluation for the overdue and blocked rules: events that name a
-  stable entity (a source with an entity type and id) are grouped, and only the
-  entity's current state (its most recent event) is judged, so a later resolved,
-  cancelled or rescheduled event clears the earlier risk and repeated reports of
-  the same work raise one risk rather than one each. The whole history stays stored
-  as evidence, and an event that names no entity is judged on its own as before.
+  stable entity (a source with an entity type and id) are grouped and folded into
+  one projected current state, so a later resolved, cancelled or rescheduled event
+  clears the earlier risk and repeated reports of the same work raise one risk
+  rather than one each. A later report updates the known state rather than
+  replacing it: an event that states neither a status nor a deadline is
+  informational and transparent, leaving the known status, the standing deadline
+  and a continuous blocked run untouched, so a progress comment cannot clear a
+  blocked, overdue task or reset how long it has been blocked. A deadline stays
+  when an update omits it and is cleared only when the work reaches a terminal
+  state. The whole history stays stored as evidence, and an event that names no
+  entity is judged on its own as before.
 - A repeated-integration-failure rule that raises a risk for every integration
   that has failed at least three times within the last week without recovering
   since, citing every failure behind it, high and escalating to critical for a
@@ -1693,15 +1699,23 @@ A risk is `medium` until the work is at least a day late, when it escalates to
 The overdue and blocked rules judge work by its current state, not by each event
 in isolation. A producer reports the same work more than once as it changes, keyed
 to a stable entity (its `source` with an `entity_type` and `entity_id`). Those
-events are grouped and only the entity's most recent event, its current state, is
-judged: a later `resolved` or `cancelled` event clears the earlier risk and a
-later `due_at` replaces an earlier one, so work that has since been finished or
-rescheduled stops being reported, and repeated reports of the same work raise one
-risk rather than one each. Each risk cites the event that established the current
-condition, and the whole history stays stored as evidence. An event that names no
-entity cannot be correlated across reports, so it is judged on its own, exactly as
-before. To get this clearing, a producer sends later state changes under the same
-`entity_id`, as the [integration contract](docs/integration-contract.md) describes.
+events are folded into one projected current state rather than read as the single
+latest event, so a later report updates what is known instead of replacing it: a
+later `resolved` or `cancelled` event clears the earlier risk, a later `due_at`
+replaces an earlier one, and repeated reports of the same work raise one risk
+rather than one each. An omitted field on an update leaves the prior value
+standing. An event that states neither a `status` nor a `due_at` is informational
+(a progress comment): it carries no work state, so it leaves the known status, the
+standing deadline and a continuous blocked run untouched rather than clearing them
+by being the latest event. A deadline is kept when an update simply does not
+mention it, and cleared only when the work reaches a terminal state, so a reopen
+without a fresh deadline has no active one. Each risk cites the event that
+established the current condition (the report that set the deadline, or the one
+that began the block), and the whole history stays stored as evidence. An event
+that names no entity cannot be correlated across reports, so it is judged on its
+own, exactly as before. To get this clearing, a producer sends later state changes
+under the same `entity_id`, as the
+[integration contract](docs/integration-contract.md) describes.
 
 The second rule is `BlockedWorkRule`. Work is blocked when its producer said so:
 the rule trusts the stated `status` of `blocked` rather than inferring one, and a
@@ -2477,8 +2491,8 @@ dashboard evidence links.
 | AI-074 | Display incidents and timelines | Demo interface | Done |
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
 | AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
-| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Ready |
-| AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Backlog |
+| AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Done |
+| AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Ready |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Backlog |
 | AI-096 | Make incident mutations atomic | Correctness and safety | Ready |
@@ -2526,19 +2540,20 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-092, AI-096 and AI-098; AI-093 stays Backlog until the corrected AI-092 is Done,
-because it depends on it.
+AI-093, AI-096 and AI-098; AI-093 became eligible now that the corrected AI-092 is
+Done.
 
-AI-092 was reopened after its first implementation. Grouping work by entity was
-right, but the implementation treats an informational event as a state
-replacement: a status-less comment on a blocked, overdue task wrongly clears both
-risks, and a later "still blocked" report wrongly resets the blocked duration and
-lowers the severity. The corrected fix must preserve known state and continuous
-blocked duration across informational events, and must distinguish an omitted
-deadline from an explicitly removed one rather than ignoring every status-less
-event. The regression scenarios are recorded in the AI-092 body in
-[`docs/tickets.md`](docs/tickets.md); the fix and its tests are for a future run,
-not written yet.
+AI-092 was reopened after its first implementation and is now Done again. The
+first implementation grouped work by entity but read the single latest event as
+the current state, so an informational event (one stating neither a status nor a
+deadline, such as a progress comment) wrongly cleared a blocked, overdue task, and
+one arriving between two blocked reports reset the blocked duration and lowered the
+severity. The corrected rules fold an entity's history into a projected state:
+informational events are transparent, an omitted deadline on an update leaves the
+prior one standing while a terminal state clears it, and the blocked run is traced
+over each event's effective status so a comment during a block does not restart its
+clock. The regression scenarios are in the AI-092 body in
+[`docs/tickets.md`](docs/tickets.md).
 
 AI-101 (container writable persistent SQLite storage) is Blocked while Docker is
 unavailable to the routine: its acceptance criteria gate on a Docker-enabled run
@@ -2679,6 +2694,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-08 - Corrected the work-state projection behind the overdue and blocked rules (AI-092, reopened): the rules read an entity's single latest event as its current state, so an informational event (one stating neither a status nor a deadline, such as a progress comment) wrongly cleared a blocked, overdue task, and one arriving between two blocked reports reset the blocked duration and lowered the severity from high back to medium. The rules now fold an entity's history into a projected state where informational events are transparent, an omitted deadline on an update keeps the prior one while a terminal state clears it, and the blocked run is traced over each event's effective status so a comment during a block does not restart its clock. Risks still cite the event that set the deadline or began the block. Added unit tests and end-to-end behavioural regressions through risk reporting and a generated brief.
 - 2026-09-07 - Prepared the board and routine for future runs: reopened AI-092 after finding its work-state implementation treats an informational (status-less, deadline-less) event as a state replacement, wrongly clearing a blocked and overdue task and resetting the blocked duration on a later re-report; recorded those as regression scenarios in the AI-092 body for the next implementation run, with the requirement that informational events preserve known state and continuous blocked duration and that the fix distinguish an omitted deadline from an explicitly removed one. Set AI-092, AI-096 and AI-098 Ready, kept AI-093 dependent on the corrected AI-092, and marked AI-101 Blocked on Docker verification with its owner. Added `docs/routine.md`, a standing routine instruction set (resume from the board and ticket bodies, one ticket at a time, verify on the real PR-head and merged-main commits, record blockers, avoid filler), linked from `CLAUDE.md`, and recorded that real-data deployments should exclude `incident_free_text` (carried to AI-112). No application code changed.
 - 2026-09-07 - Extended AI context exclusion to cover all prompt material (AI-094): an excluded field was masked in the plain event and timeline lines but still reached the model through prose derived from it, so excluding `subject` left it visible in the risk titles and in an incident title declared from a risk, and excluding `occurred_at` left it visible in the incident span. Those derived surfaces are now held back as whole units (never scanned and rewritten), so a held-back field cannot leak through them. Added a separate `incident_free_text` opt-out control that holds back an incident's free-form title and resolution note, which are operator text rather than event fields. The deterministic structured output is unchanged; the brief and incident-summary prompt versions were bumped because the material a model is shown changed. Added unit and end-to-end capturing-fake regressions across both generation paths.
 - 2026-09-07 - Evaluated work by its current state in the overdue and blocked rules (AI-092): events that name a stable entity (a source with an entity type and id) are grouped and only the entity's most recent event, its current state, is judged. A later resolved or cancelled event now clears the earlier blocked or overdue risk, a later deadline replaces an earlier one, and repeated reports of the same work raise one risk rather than one each. This makes the rules honour the integration contract, that a later state change for the same entity id clears a situation, which the per-event rules did not. Events that name no entity are still judged individually, and the whole history stays stored as evidence. Added a work-state projection module, unit tests and a table-driven behavioural suite through risk reporting and a generated brief.
@@ -2692,7 +2708,6 @@ it is not picked up and left half-finished.
 - 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
 - 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
 - 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
-- 2026-09-01 - Added an incident-timeline endpoint, `GET /incidents/{incident_id}/timeline`: it resolves a tracked incident's cited events against the whole event history and returns them laid out oldest first with the span they ran over, the same deterministic picture the incident summary is phrased over, without the prose. No model takes part, so a cited id no stored event answers to is named in `missing_event_ids` rather than dropped, the span is derived from the entries so it cannot disagree with them, and a missing incident is answered with 404. It reuses the same `build_incident_timeline` the dashboard renders a timeline from, so the platform can fetch a timeline over HTTP rather than only seeing one on the dashboard.
 
 ## Future Game Center Integration
 

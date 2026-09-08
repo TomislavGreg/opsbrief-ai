@@ -33,11 +33,11 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-092 (reopened, see its body), AI-096 and
-AI-098; AI-093 stays Backlog until the corrected AI-092 is Done; AI-101 is Blocked
-on Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
-on a workflow change. AI-094 is Done. Read the board, not this paragraph, for the
-current state.
+At the last update the Ready queue was AI-093, AI-096 and AI-098; AI-093 became
+eligible now that the corrected AI-092 is Done; AI-101 is Blocked on Docker
+verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
+workflow change. AI-092 and AI-094 are Done. Read the board, not this paragraph,
+for the current state.
 
 A sensible progression:
 
@@ -61,8 +61,9 @@ rewriting the history.
 
 ### AI-092: Evaluate current work state before raising blocked and overdue risks
 
-Priority P1, Bug, effort M, Routine. Depends on: none. Finding F01. Status: Ready
-(reopened after a partial implementation, see "Reopened" below).
+Priority P1, Bug, effort M, Routine. Depends on: none. Finding F01. Status: Done
+(reopened after a partial implementation, corrected; see "Reopened" and
+"Resolved" below).
 
 Evidence: a blocked or past-due event followed by a resolved event for the same
 entity still raises both risks. The overdue and blocked rules classify individual
@@ -121,10 +122,24 @@ Preserve the passing clearing behaviour and the immutable-history and
 repeated-integration-failure guarantees. Do not write the fix or its tests in the
 planning update that recorded this; they belong to a future implementation run.
 
+Resolved: the rules now fold an entity's history into a projected current state
+(`opsbrief/risks/work_state.py`) instead of reading only its latest event. An
+event stating neither a `status` nor a `due_at` is informational and transparent:
+it leaves the known status, the standing deadline and a continuous blocked run
+untouched. A stated status or deadline updates the projection; an omitted deadline
+on an update keeps the prior one; a terminal status ends the work and clears its
+deadline, which is the one explicit removal as against a merely omitted one. The
+blocked run is traced over each event's effective status, so a comment during a
+block does not restart its clock or lower its severity, and its start is the report
+that established the block. Overdue and blocked risks cite the event that set the
+deadline and the one that began the block. Covered by unit tests
+(`tests/test_risks_work_state.py`) and the behavioural suite through risk reporting
+and a generated brief (`tests/test_risks_work_state_scenarios.py`).
+
 ### AI-093: Apply one evaluation instant and normalise iterable rule inputs
 
 Priority P1, Bug, effort M, Routine. Depends on: the corrected AI-092 (Done).
-Finding F02. Stays Backlog until AI-092 is Done again, since it builds on the same
+Finding F02. Ready now that AI-092 is Done again, since it builds on the same
 work-state path.
 
 Evidence: a future recovery clears three current integration failures; future
