@@ -14,12 +14,15 @@ import pytest
 
 from opsbrief.ai import FakeAIProvider
 from opsbrief.events import Event, EventInput
+from opsbrief.risks.schema import RiskSeverity
 from opsbrief.services import list_risks, report_daily_brief
 from opsbrief.storage import EventStore
 
 NOW = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 PAST_DUE = NOW - timedelta(hours=3)
 FUTURE_DUE = NOW + timedelta(days=1)
+#: A deadline and a block old enough to have escalated to high severity.
+LONG_PAST_DUE = NOW - timedelta(hours=48)
 
 #: An entity all events in a scenario share, so they describe one piece of work.
 ENTITY = {"entity_type": "task", "entity_id": "M-3301"}
@@ -135,6 +138,31 @@ SCENARIOS: list[tuple[str, list[Event], set[str]]] = [
         ],
         {"blocked_work"},
     ),
+    (
+        "an informational comment preserves a block and its deadline",
+        [
+            _event("a", hours_ago=48, status="blocked", due_at=LONG_PAST_DUE),
+            _event("b", hours_ago=1, subject="Working on it", metadata={"note": "chasing vendor"}),
+        ],
+        {"blocked_work", "overdue_work"},
+    ),
+    (
+        "an omitted deadline on an update keeps the work overdue",
+        [
+            _event("a", hours_ago=5, status="open", due_at=PAST_DUE),
+            _event("b", hours_ago=1, status="in_progress"),
+        ],
+        {"overdue_work"},
+    ),
+    (
+        "an informational comment does not reopen resolved work",
+        [
+            _event("a", hours_ago=5, status="blocked"),
+            _event("b", hours_ago=3, status="resolved"),
+            _event("c", hours_ago=1, subject="Adding context"),
+        ],
+        set(),
+    ),
 ]
 
 
@@ -200,3 +228,39 @@ def test_an_unresolved_entity_reaches_the_generated_brief(store: EventStore) -> 
 
     assert [risk.rule for risk in brief.risks] == ["blocked_work"]
     assert brief.source_event_ids == ["a"]
+
+
+def test_an_informational_comment_does_not_lower_severity_or_reset_the_clock(
+    store: EventStore,
+) -> None:
+    # A task blocked and overdue for 48 hours is high severity. A later progress
+    # comment carrying no status and no deadline must not clear the risks, reset
+    # the blocked clock back to medium, or reattribute them to itself.
+    store.add(_event("blocked", hours_ago=48, status="blocked", due_at=LONG_PAST_DUE))
+    store.add(_event("note", hours_ago=1, subject="Chasing the vendor"))
+
+    risks = {risk.rule: risk for risk in list_risks(store, NOW).risks}
+
+    assert set(risks) == {"blocked_work", "overdue_work"}
+    assert risks["blocked_work"].severity is RiskSeverity.HIGH
+    assert risks["blocked_work"].event_ids == ["blocked"]
+    assert risks["overdue_work"].severity is RiskSeverity.HIGH
+    assert risks["overdue_work"].event_ids == ["blocked"]
+
+
+def test_a_still_blocked_report_after_a_comment_keeps_the_original_clock(
+    store: EventStore,
+) -> None:
+    # The block began 48 hours ago; an informational comment and a genuine
+    # "still blocked" re-report follow. The severity must stay high, measured
+    # from when the block began, and cite the report that started it.
+    store.add(_event("start", hours_ago=48, status="blocked"))
+    store.add(_event("note", hours_ago=6, subject="Vendor called back"))
+    store.add(_event("again", hours_ago=1, status="blocked"))
+
+    risks = list_risks(store, NOW).risks
+
+    assert len(risks) == 1
+    assert risks[0].rule == "blocked_work"
+    assert risks[0].severity is RiskSeverity.HIGH
+    assert risks[0].event_ids == ["start"]
