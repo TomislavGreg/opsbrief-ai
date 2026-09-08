@@ -89,7 +89,7 @@ class BlockedWorkRule:
         individually, as before.
         """
         states, unkeyed = group_work(events)
-        blocked = [start for state in states if (start := state.blocked_run_start()) is not None]
+        blocked = [state.blocked_since for state in states if state.blocked_since is not None]
         blocked += [event for event in unkeyed if is_blocked_work(event)]
         blocked.sort(key=lambda event: (event.occurred_at, event.id))
         return [self._risk(event) for event in blocked]

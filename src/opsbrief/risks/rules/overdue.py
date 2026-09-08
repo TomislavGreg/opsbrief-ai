@@ -21,9 +21,10 @@ detection deterministic and lets a test pin the boundary exactly.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from opsbrief.events import Event, as_utc
+from opsbrief.events import Event, EventStatus, as_utc
 from opsbrief.risks.schema import Risk, RiskSeverity
 from opsbrief.risks.work_state import TERMINAL_STATUSES, group_work
 
@@ -57,6 +58,22 @@ def _shorten(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+@dataclass(frozen=True)
+class _OverdueItem:
+    """One overdue work item, drawn from a projected state or a lone event.
+
+    Keeping the fields a risk is built from together lets the keyed and unkeyed
+    paths share one ordering and one risk builder. ``status`` is the current
+    status the deadline is judged against, and ``event_id`` cites the event that
+    set the deadline.
+    """
+
+    subject: str
+    due_at: datetime
+    status: EventStatus | None
+    event_id: str
+
+
 class OverdueWorkRule:
     """Raise a risk for every event describing work past its deadline.
 
@@ -77,32 +94,53 @@ class OverdueWorkRule:
     def evaluate(self, events: Sequence[Event]) -> list[Risk]:
         """Return one risk per overdue work item, most overdue first.
 
-        Each tracked entity contributes at most one risk, judged on its current
-        state, so a piece of work that was resolved or rescheduled no longer shows
-        as overdue and repeated reports of the same work do not each raise a risk.
-        Events that name no entity are judged individually, as before.
+        Each tracked entity contributes at most one risk, judged on its projected
+        current state, so a piece of work that was resolved or rescheduled no
+        longer shows as overdue and repeated or informational reports of the same
+        work do not each raise a risk. The event cited is the one that set the
+        current deadline. Events that name no entity are judged individually, as
+        before.
         """
         states, unkeyed = group_work(events)
-        overdue = [state.current for state in states if is_overdue_work(state.current, self._now)]
-        overdue += [event for event in unkeyed if is_overdue_work(event, self._now)]
-        overdue.sort(key=lambda event: (event.due_at, event.id))
-        return [self._risk(event) for event in overdue]
+        overdue: list[_OverdueItem] = []
+        for state in states:
+            deadline = state.overdue_deadline(self._now)
+            if deadline is not None:
+                overdue.append(
+                    _OverdueItem(
+                        subject=deadline.subject,
+                        due_at=deadline.due_at,
+                        status=state.status,
+                        event_id=deadline.id,
+                    )
+                )
+        overdue += [
+            _OverdueItem(
+                subject=event.subject,
+                due_at=event.due_at,
+                status=event.status,
+                event_id=event.id,
+            )
+            for event in unkeyed
+            if is_overdue_work(event, self._now)
+        ]
+        overdue.sort(key=lambda item: (item.due_at, item.event_id))
+        return [self._risk(item) for item in overdue]
 
-    def _risk(self, event: Event) -> Risk:
-        """Build the risk for one overdue event, tagged and traceable."""
-        assert event.due_at is not None  # guaranteed by is_overdue_work
-        due = event.due_at.strftime(_DISPLAY_FORMAT)
+    def _risk(self, item: _OverdueItem) -> Risk:
+        """Build the risk for one overdue work item, tagged and traceable."""
+        due = item.due_at.strftime(_DISPLAY_FORMAT)
         now = self._now.strftime(_DISPLAY_FORMAT)
-        status_clause = f" (status: {event.status.value})" if event.status is not None else ""
+        status_clause = f" (status: {item.status.value})" if item.status is not None else ""
         return Risk(
             rule=self.rule_id,
-            title=_shorten(f"{event.subject} is overdue", 200),
+            title=_shorten(f"{item.subject} is overdue", 200),
             detail=(
-                f'Work "{event.subject}" was due at {due} and has not been resolved'
+                f'Work "{item.subject}" was due at {due} and has not been resolved'
                 f"{status_clause}. It is overdue as of {now}."
             ),
-            severity=self._severity(event.due_at),
-            event_ids=[event.id],
+            severity=self._severity(item.due_at),
+            event_ids=[item.event_id],
         )
 
     def _severity(self, due_at: datetime) -> RiskSeverity:
