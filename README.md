@@ -105,7 +105,15 @@ produced it.
 - A repeated-integration-failure rule that raises a risk for every integration
   that has failed at least three times within the last week without recovering
   since, citing every failure behind it, high and escalating to critical for a
-  larger run, most failures first.
+  larger run, most failures first. A recovery clears every failure that occurred
+  before it; only a recovery strictly later than a failure clears it, so a failure
+  at or after the most recent recovery still counts.
+- One reference-instant boundary across every rule and the daily-brief context: an
+  event occurring after the instant the picture is judged against is a future
+  report and takes no part in the present snapshot, so it cannot raise or clear a
+  risk (a scheduled resolution, a future recovery or a future reschedule does not
+  clear a present one) or appear as recent activity, and advancing the instant past
+  it admits it predictably. The boundary is on occurrence time, not receipt time.
 - Deterministic priority scoring that ranks risks from different rules against
   each other: severity decides the order, the amount of evidence breaks ties, and
   the rest is settled by rule, title and event id, so the most pressing risk
@@ -1742,10 +1750,13 @@ the integration they name — an event whose `status` is `failed` and that carri
 an `entity_id`, so it can be attributed — and raises a risk once one integration
 has failed at least three times within the last week. A failure names its
 integration through `entity_id`, so a failure with no entity is left to other
-rules. A recovery (a `resolved` event for the same integration) that lands after a
-run of failures clears it, the same way a `resolved` status clears overdue work,
-so a manager sees integrations failing now rather than ones that already came
-back. Each risk cites every failure behind it, oldest first; severity is `high`,
+rules. A recovery (a `resolved` event for the same integration) clears every
+failure that occurred before it, the same way a `resolved` status clears overdue
+work, so a manager sees integrations failing now rather than ones that already
+came back. Only a recovery strictly later than a failure clears it: a failure at
+or after the integration's most recent recovery still counts, and a recovery
+exactly at a failure's instant does not clear it, the same boundary the overdue
+rule draws at a deadline. Each risk cites every failure behind it, oldest first; severity is `high`,
 rising to `critical` for a run of five or more; and the risks come back
 most-failures first, ties broken by the first cited event id.
 
@@ -1763,6 +1774,18 @@ now = datetime.now(timezone.utc)
 rules = [OverdueWorkRule(now), BlockedWorkRule(now), RepeatedIntegrationFailureRule(now)]
 risks = detect_risks(events, rules)
 ```
+
+Every rule judges the picture as of the one reference instant it is built with,
+and that instant is a boundary as well as a clock. An event whose `occurred_at`
+is after it is a future report, describing something that has not happened yet, so
+it takes no part in the present snapshot: it cannot raise a risk, cannot clear one
+(a scheduled resolution does not clear a block or overdue task, a future recovery
+does not clear a standing run of failures, a future reschedule does not clear a
+present overdue deadline), and does not count as recent activity in a brief. The
+boundary is on occurrence time, not receipt time, matching how the rules already
+reason about the reference instant; advancing the instant past such an event
+admits it like any other. The daily-brief context applies the same boundary before
+it counts events, runs the rules or gathers its recent-events view.
 
 `detect_risks` gathers each rule's risks in the order the rules are given, which
 is not an order of urgency: the overdue rule's risks precede the integration
@@ -2492,9 +2515,9 @@ dashboard evidence links.
 | AI-075 | Add a public demo-data mode | Demo interface | Done |
 | AI-088 | Show suggested next actions on the dashboard | Demo interface | Done |
 | AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Done |
-| AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Ready |
+| AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Done |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
-| AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Backlog |
+| AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Ready |
 | AI-096 | Make incident mutations atomic | Correctness and safety | Ready |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Backlog |
 | AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Ready |
@@ -2540,8 +2563,8 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-093, AI-096 and AI-098; AI-093 became eligible now that the corrected AI-092 is
-Done.
+AI-096, AI-098 and AI-095; AI-095 became eligible now that AI-094 is Done, and
+AI-093 has landed.
 
 AI-092 was reopened after its first implementation and is now Done again. The
 first implementation grouped work by entity but read the single latest event as
@@ -2694,6 +2717,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-09 - Applied one reference-instant boundary across the risk rules and the daily-brief context (AI-093): the overdue, blocked and repeated-integration-failure rules and the brief context folded in events dated after the instant the picture is judged against, so a future report reached back into today's snapshot (a scheduled resolution cleared a present block or overdue task, a future recovery cleared a standing run of failures, a future reschedule cleared a present overdue deadline, and future-dated events were counted and shown as recent activity). A shared occurrence-time filter now keeps only events that had occurred by the reference, so future reports take no part in the present snapshot and advancing the reference admits them predictably. Aligned the integration recovery boundary with its documentation and the overdue rule (only a recovery strictly later than a failure clears it), and materialised the events iterable once in incident declaration so a one-shot generator is no longer exhausted by the first rule. Added a cross-rule boundary suite, the equal-time and strictly-later recovery cases, a non-UTC reference, and generator/list declaration parity.
 - 2026-09-08 - Corrected the work-state projection behind the overdue and blocked rules (AI-092, reopened): the rules read an entity's single latest event as its current state, so an informational event (one stating neither a status nor a deadline, such as a progress comment) wrongly cleared a blocked, overdue task, and one arriving between two blocked reports reset the blocked duration and lowered the severity from high back to medium. The rules now fold an entity's history into a projected state where informational events are transparent, an omitted deadline on an update keeps the prior one while a terminal state clears it, and the blocked run is traced over each event's effective status so a comment during a block does not restart its clock. Risks still cite the event that set the deadline or began the block. Added unit tests and end-to-end behavioural regressions through risk reporting and a generated brief.
 - 2026-09-07 - Prepared the board and routine for future runs: reopened AI-092 after finding its work-state implementation treats an informational (status-less, deadline-less) event as a state replacement, wrongly clearing a blocked and overdue task and resetting the blocked duration on a later re-report; recorded those as regression scenarios in the AI-092 body for the next implementation run, with the requirement that informational events preserve known state and continuous blocked duration and that the fix distinguish an omitted deadline from an explicitly removed one. Set AI-092, AI-096 and AI-098 Ready, kept AI-093 dependent on the corrected AI-092, and marked AI-101 Blocked on Docker verification with its owner. Added `docs/routine.md`, a standing routine instruction set (resume from the board and ticket bodies, one ticket at a time, verify on the real PR-head and merged-main commits, record blockers, avoid filler), linked from `CLAUDE.md`, and recorded that real-data deployments should exclude `incident_free_text` (carried to AI-112). No application code changed.
 - 2026-09-07 - Extended AI context exclusion to cover all prompt material (AI-094): an excluded field was masked in the plain event and timeline lines but still reached the model through prose derived from it, so excluding `subject` left it visible in the risk titles and in an incident title declared from a risk, and excluding `occurred_at` left it visible in the incident span. Those derived surfaces are now held back as whole units (never scanned and rewritten), so a held-back field cannot leak through them. Added a separate `incident_free_text` opt-out control that holds back an incident's free-form title and resolution note, which are operator text rather than event fields. The deterministic structured output is unchanged; the brief and incident-summary prompt versions were bumped because the material a model is shown changed. Added unit and end-to-end capturing-fake regressions across both generation paths.
@@ -2707,8 +2731,6 @@ it is not picked up and left half-finished.
 - 2026-09-04 - Added HTTP editing of an incident's cited events: `POST /incidents/{incident_id}/events` attributes more source events to a tracked incident and `DELETE /incidents/{incident_id}/events/{event_id}` detaches one, so the platform can grow or trim an incident's evidence as the picture develops rather than only fixing it at declaration. Both go through the incident model's link and unlink, so they stay idempotent (linking appends without reordering or duplicating, unlinking ignores an id not cited), a body that fails the contract is a 422, a missing incident a 404, and a change the model refuses (a closed incident, whose evidence is frozen, or an unlink that would leave the incident with no source events) a 409.
 - 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
 - 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
-- 2026-09-01 - Added occurrence-time filtering to `GET /events`: the listing now takes optional `occurred_from` and `occurred_to` bounds, so a caller can ask for only the events in a time window (a match day, the last hour) rather than paging the whole history. Each bound must carry a timezone offset like an event's `occurred_at` and is normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. The bounds are inclusive conditions on `occurred_at`, threaded through the store's `list_events` and `count` so a windowed listing and its total stay in step.
-
 ## Future Game Center Integration
 
 OpsBrief AI is a standalone open-source service and contains no private,
