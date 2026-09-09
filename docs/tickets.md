@@ -33,11 +33,11 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-093, AI-096 and AI-098; AI-093 became
-eligible now that the corrected AI-092 is Done; AI-101 is Blocked on Docker
-verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
-workflow change. AI-092 and AI-094 are Done. Read the board, not this paragraph,
-for the current state.
+At the last update the Ready queue was AI-096, AI-098 and AI-095; AI-095 became
+eligible now that AI-094 is Done, and AI-093 has landed; AI-101 is Blocked on
+Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
+on a workflow change. AI-092, AI-093 and AI-094 are Done. Read the board, not this
+paragraph, for the current state.
 
 A sensible progression:
 
@@ -139,8 +139,22 @@ and a generated brief (`tests/test_risks_work_state_scenarios.py`).
 ### AI-093: Apply one evaluation instant and normalise iterable rule inputs
 
 Priority P1, Bug, effort M, Routine. Depends on: the corrected AI-092 (Done).
-Finding F02. Ready now that AI-092 is Done again, since it builds on the same
-work-state path.
+Finding F02. Status: Done.
+
+Resolution: a single occurrence-time boundary
+(`opsbrief.risks.work_state.occurred_by`) now runs before the overdue, blocked and
+repeated-integration-failure rules and the brief context, so an event dated after
+the reference instant is a future report that takes no part in the present
+snapshot: it cannot create or clear a present risk (a scheduled resolution, a
+future recovery or a future reschedule no longer clears one) or appear as recent
+activity, and advancing the reference admits it predictably. The boundary is on
+occurrence time, not receipt time; receipt time only breaks ordering ties. The
+integration recovery comparison was aligned with its own documentation and the
+overdue rule (a failure at or after the most recent recovery still counts; only a
+strictly later recovery clears it). One-shot iterables are materialised once in
+`declare_incidents_from_events`, at the composition boundary, so a generator is not
+exhausted by the first rule and yields the same declarations as the equivalent
+list. This ticket does not introduce a bitemporal store.
 
 Evidence: a future recovery clears three current integration failures; future
 work enters today's context. The equal-time recovery prose disagrees with its
