@@ -16,6 +16,7 @@ from opsbrief.brief.schema import BriefContext, EventDigest, collect_source_even
 from opsbrief.events import Event, as_utc
 from opsbrief.references import build_source_references
 from opsbrief.risks import Risk, default_rules, detect_risks, prioritize
+from opsbrief.risks.work_state import occurred_by
 from opsbrief.warnings import GenerationWarning, WarningCode
 
 #: How many recent events a brief context carries by default. The view is bounded
@@ -93,24 +94,27 @@ def build_brief_context(
 ) -> BriefContext:
     """Assemble the material a daily brief for ``now`` is built from.
 
-    The canonical risk rules run over the whole of ``events`` at ``now``, so a
-    risk is judged against the full history rather than the bounded recent view,
-    and the risks are ranked most urgent first. The recent-events view is capped
-    at ``max_recent_events`` so the context — and any prompt built from it — stays
-    bounded. ``events`` is not mutated, and the same events at the same instant
-    always yield the same context.
+    The picture is judged as of ``now``: events occurring after it are future
+    reports and take no part in the context, so they cannot be counted, shown as
+    recent activity or reach the risk rules. The canonical risk rules then run over
+    the whole of that history, so a risk is judged against it rather than the
+    bounded recent view, and the risks are ranked most urgent first. The
+    recent-events view is capped at ``max_recent_events`` so the context, and any
+    prompt built from it, stays bounded. ``events`` is not mutated, and the same
+    events at the same instant always yield the same context.
     """
     if max_recent_events < 1:
         raise ValueError("max_recent_events must be at least 1")
 
     reference = as_utc(now)
-    risks = prioritize(detect_risks(events, default_rules(reference)))
-    recent = [_digest(event) for event in _order_newest_first(events)[:max_recent_events]]
-    references = build_source_references(collect_source_event_ids(risks, recent), events)
-    warnings = _warnings(len(events), risks, len(recent))
+    present = occurred_by(events, reference)
+    risks = prioritize(detect_risks(present, default_rules(reference)))
+    recent = [_digest(event) for event in _order_newest_first(present)[:max_recent_events]]
+    references = build_source_references(collect_source_event_ids(risks, recent), present)
+    warnings = _warnings(len(present), risks, len(recent))
     return BriefContext(
         generated_at=reference,
-        event_count=len(events),
+        event_count=len(present),
         risks=risks,
         recent_events=recent,
         notes=[warning.message for warning in warnings],

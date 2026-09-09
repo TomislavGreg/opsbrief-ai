@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 
 from opsbrief.events import Event, EventStatus, as_utc
 from opsbrief.risks.schema import Risk, RiskSeverity
+from opsbrief.risks.work_state import occurred_by
 
 #: An integration's grouping key: the producer, the kind of thing, and its id.
 IntegrationKey = tuple[str, str | None, str]
@@ -105,10 +106,15 @@ class RepeatedIntegrationFailureRule:
         self._since = self._now - WINDOW
 
     def evaluate(self, events: Sequence[Event]) -> list[Risk]:
-        """Return one risk per integration failing repeatedly, most failures first."""
+        """Return one risk per integration failing repeatedly, most failures first.
+
+        Failures and recoveries occurring after the reference instant are future
+        reports and take no part in the present snapshot, so a scheduled recovery
+        cannot clear failures that are still standing now.
+        """
         failures: dict[IntegrationKey, list[Event]] = {}
         recoveries: dict[IntegrationKey, list[Event]] = {}
-        for event in events:
+        for event in occurred_by(events, self._now):
             if is_integration_failure(event):
                 failures.setdefault(integration_key(event), []).append(event)
             elif is_integration_recovery(event):
@@ -126,16 +132,18 @@ class RepeatedIntegrationFailureRule:
     def _active_failures(self, failures: list[Event], recoveries: list[Event]) -> list[Event]:
         """Return the in-window failures not cleared by a later recovery, oldest first.
 
-        A failure counts when it occurred within :data:`WINDOW` before the
-        reference instant and strictly after the integration's most recent
-        recovery; a recovery exactly at a failure's instant does not clear it.
+        A failure counts when it occurred within :data:`WINDOW` before the reference
+        instant and was not cleared by a recovery: only a recovery strictly later
+        than a failure clears it, so a failure at or after the integration's most
+        recent recovery still stands. A recovery exactly at a failure's instant does
+        not clear it, the same boundary the overdue rule draws at a deadline.
         """
         last_recovery = max((event.occurred_at for event in recoveries), default=None)
         active = [
             event
             for event in failures
             if self._since <= event.occurred_at <= self._now
-            and (last_recovery is None or event.occurred_at > last_recovery)
+            and (last_recovery is None or event.occurred_at >= last_recovery)
         ]
         active.sort(key=lambda event: (event.occurred_at, event.id))
         return active

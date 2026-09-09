@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 
 from opsbrief.events import Event, EventStatus, as_utc
 from opsbrief.risks.schema import Risk, RiskSeverity
-from opsbrief.risks.work_state import TERMINAL_STATUSES, group_work
+from opsbrief.risks.work_state import TERMINAL_STATUSES, group_work, occurred_by
 
 #: Identifier the overdue rule tags its risks with.
 RULE_ID = "overdue_work"
@@ -99,9 +99,10 @@ class OverdueWorkRule:
         longer shows as overdue and repeated or informational reports of the same
         work do not each raise a risk. The event cited is the one that set the
         current deadline. Events that name no entity are judged individually, as
-        before.
+        before. Events occurring after the reference instant are future reports and
+        take no part in the present snapshot.
         """
-        states, unkeyed = group_work(events)
+        states, unkeyed = group_work(occurred_by(events, self._now))
         overdue: list[_OverdueItem] = []
         for state in states:
             deadline = state.overdue_deadline(self._now)

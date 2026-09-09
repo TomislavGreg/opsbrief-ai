@@ -126,6 +126,47 @@ def test_a_recovery_before_the_run_does_not_clear_it() -> None:
     assert len(RepeatedIntegrationFailureRule(NOW).evaluate(events)) == 1
 
 
+def test_a_recovery_at_a_failures_instant_does_not_clear_it() -> None:
+    # Only a recovery strictly later than a failure clears it, the same boundary
+    # the overdue rule draws at a deadline: a failure sharing the recovery's
+    # instant, plus two strictly later, still make a run of three.
+    events = [
+        failure("edge", ago=timedelta(hours=3)),
+        recovery("rec", ago=timedelta(hours=3)),
+        failure("f2", ago=timedelta(hours=2)),
+        failure("f3", ago=timedelta(hours=1)),
+    ]
+
+    risks = RepeatedIntegrationFailureRule(NOW).evaluate(events)
+
+    assert len(risks) == 1
+    assert risks[0].event_ids == ["edge", "f2", "f3"]
+
+
+def test_a_recovery_strictly_after_a_failure_clears_it() -> None:
+    # The same failure, now strictly before the recovery, is cleared, so only two
+    # in-window failures remain and the run falls below the threshold.
+    events = [
+        failure("cleared", ago=timedelta(hours=3, minutes=1)),
+        recovery("rec", ago=timedelta(hours=3)),
+        failure("f2", ago=timedelta(hours=2)),
+        failure("f3", ago=timedelta(hours=1)),
+    ]
+
+    assert RepeatedIntegrationFailureRule(NOW).evaluate(events) == []
+
+
+def test_a_non_utc_reference_classifies_the_same_as_its_utc_instant() -> None:
+    from datetime import timezone
+
+    events = make_run(FAILURE_THRESHOLD)
+    aware = NOW.astimezone(timezone(timedelta(hours=5)))
+
+    assert RepeatedIntegrationFailureRule(aware).evaluate(events) == RepeatedIntegrationFailureRule(
+        NOW
+    ).evaluate(events)
+
+
 def test_failures_outside_the_window_are_ignored() -> None:
     events = [
         failure(f"f{i}", ago=WINDOW + timedelta(hours=i + 1)) for i in range(FAILURE_THRESHOLD)

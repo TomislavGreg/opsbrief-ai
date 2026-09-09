@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from opsbrief.events import Event, EventInput
+from opsbrief.events import Event, EventInput, EventStatus
 from opsbrief.incidents import (
     IncidentSeverity,
     IncidentStatus,
@@ -129,6 +129,25 @@ def test_every_declared_incident_shares_the_reference_instant() -> None:
 
     assert all(incident.opened_at == NOW for incident in incidents)
     assert all(incident.updated_at == NOW for incident in incidents)
+
+
+def test_a_generator_yields_the_same_incidents_as_the_equivalent_list() -> None:
+    # One overdue and one blocked event exercise two different default rules. If a
+    # one-shot generator were passed straight to the detector the first rule would
+    # exhaust it and the second would see nothing; materialising it once at the
+    # boundary makes the generator and the equivalent list declare the same.
+    events = [
+        make_event("overdue", due_at=NOW - timedelta(hours=2)),
+        make_event("blocked", status=EventStatus.BLOCKED),
+    ]
+
+    from_list = declare_incidents_from_events(list(events), at=NOW)
+    from_generator = declare_incidents_from_events((event for event in events), at=NOW)
+
+    assert [(incident.title, incident.event_ids) for incident in from_list] == [
+        (incident.title, incident.event_ids) for incident in from_generator
+    ]
+    assert {incident.event_ids[0] for incident in from_generator} == {"overdue", "blocked"}
 
 
 def test_the_stub_rule_satisfies_the_rule_protocol() -> None:

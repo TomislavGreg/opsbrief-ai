@@ -75,8 +75,14 @@ def declare_incidents_from_events(
     an incident is declared for each. The result is therefore ordered most urgent
     first too, and events raising no risk produce no incident. Nothing is stored:
     the caller decides which of the returned incidents to persist and track.
+
+    ``events`` may be any iterable, including a one-shot generator. It is
+    materialised once here, at the composition boundary, before the detector runs
+    every rule over it, so a generator is not exhausted by the first rule and a
+    list and the equivalent generator yield identical declarations.
     """
     reference = at or datetime.now(UTC)
+    materialised = tuple(events)
     rule_set = default_rules(reference) if rules is None else rules
-    risks = prioritize(detect_risks(events, rule_set))
+    risks = prioritize(detect_risks(materialised, rule_set))
     return [declare_incident_from_risk(risk, at=reference) for risk in risks]
