@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 
 from opsbrief.events import Event, EventStatus, as_utc
 from opsbrief.risks.schema import Risk, RiskSeverity
-from opsbrief.risks.work_state import group_work
+from opsbrief.risks.work_state import group_work, occurred_by
 
 #: Identifier the blocked-work rule tags its risks with.
 RULE_ID = "blocked_work"
@@ -86,9 +86,10 @@ class BlockedWorkRule:
         blocked reports of the same work do not each raise a risk. The event cited
         is the one that began the current run of blocked reports, so the risk dates
         from when the work became blocked. Events that name no entity are judged
-        individually, as before.
+        individually, as before. Events occurring after the reference instant are
+        future reports and take no part in the present snapshot.
         """
-        states, unkeyed = group_work(events)
+        states, unkeyed = group_work(occurred_by(events, self._now))
         blocked = [state.blocked_since for state in states if state.blocked_since is not None]
         blocked += [event for event in unkeyed if is_blocked_work(event)]
         blocked.sort(key=lambda event: (event.occurred_at, event.id))

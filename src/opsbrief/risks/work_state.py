@@ -40,7 +40,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from opsbrief.events import Event, EventStatus
+from opsbrief.events import Event, EventStatus, as_utc
 
 #: A work entity's key: the producing source, the entity kind and its id.
 WorkKey = tuple[str, str, str]
@@ -48,6 +48,27 @@ WorkKey = tuple[str, str, str]
 #: Statuses in which a piece of work is finished, so its current state raises no
 #: blocked or overdue risk however its earlier events read.
 TERMINAL_STATUSES = frozenset({EventStatus.RESOLVED, EventStatus.CANCELLED})
+
+
+def occurred_by(events: Sequence[Event], reference: datetime) -> list[Event]:
+    """Return the events that had occurred by ``reference``, in input order.
+
+    The risk picture is judged as of a single reference instant. An event whose
+    ``occurred_at`` is after that instant describes something that has not yet
+    happened as of the reference, so it is not part of the present picture: it can
+    neither raise nor clear a current risk, nor count as recent activity. Applying
+    this one boundary before every rule and the recent-events view keeps a future
+    report (a scheduled resolution, a deadline set ahead of time) from reaching
+    back into today's snapshot; advancing the reference past such an event admits
+    it like any other.
+
+    The boundary is on occurrence time, not receipt time, matching how every rule
+    reasons about ``now`` (deadlines, blocked runs and failure windows are all read
+    from ``occurred_at``). Receipt time only breaks ordering ties. ``reference`` is
+    read in UTC to match the UTC ``occurred_at`` on stored events.
+    """
+    boundary = as_utc(reference)
+    return [event for event in events if event.occurred_at <= boundary]
 
 
 def work_key(event: Event) -> WorkKey | None:
