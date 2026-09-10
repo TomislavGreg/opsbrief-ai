@@ -244,6 +244,14 @@ produced it.
   body that fails the contract is 422, a missing incident is 404, and a change the
   model refuses (a closed incident, whose evidence is frozen, or an unlink that would
   leave the incident with no events) is 409.
+- Atomic incident mutations: resolving, transitioning, linking and unlinking an
+  incident each read the stored record, apply the change and write it back as one
+  step while holding the store lock, so two changes arriving at once for the same
+  incident are serialised rather than each reading the same row and the later write
+  silently dropping the earlier one. Concurrent links preserve every addition, and a
+  rejected change (a forbidden lifecycle move, a link to a closed incident) leaves
+  the stored record exactly as it was. The guarantee holds within the single shared
+  store the service runs.
 - Sensitive-metadata redaction: a metadata value whose key names a sensitive
   term (a credential, an email, a phone number) is masked with a visible
   `[redacted]` marker before the event is stored, so it never reaches the
@@ -2518,8 +2526,8 @@ dashboard evidence links.
 | AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Done |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Ready |
-| AI-096 | Make incident mutations atomic | Correctness and safety | In Progress |
-| AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Backlog |
+| AI-096 | Make incident mutations atomic | Correctness and safety | Done |
+| AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Ready |
 | AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Ready |
 | AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Backlog |
 | AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Backlog |
@@ -2563,8 +2571,8 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-096, AI-098 and AI-095; AI-095 became eligible now that AI-094 is Done, and
-AI-093 has landed.
+AI-098, AI-095 and AI-097; AI-097 became eligible now that AI-096 is Done, and
+AI-095 now that AI-094 is Done.
 
 AI-092 was reopened after its first implementation and is now Done again. The
 first implementation grouped work by entity but read the single latest event as
@@ -2717,6 +2725,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-10 - Made incident mutations atomic (AI-096): resolving, transitioning, linking and unlinking an incident read the record and wrote it back in two separate lock acquisitions, so two changes arriving at once for the same incident each read the same row and the later save silently dropped the earlier change while both callers saw success. Added `IncidentStore.mutate`, which reads, applies the change and writes it back under one held lock, and routed all four services through it, so concurrent mutations to one incident are serialised and none is lost; a rejected change still raises from the incident model and leaves the stored row untouched. Added store unit tests for the found, missing and rejected cases and barrier-released concurrency tests over a shared file-backed store, reopened to confirm the persisted outcome. The guarantee is scoped to the one shared store the service runs, which is documented.
 - 2026-09-09 - Applied one reference-instant boundary across the risk rules and the daily-brief context (AI-093): the overdue, blocked and repeated-integration-failure rules and the brief context folded in events dated after the instant the picture is judged against, so a future report reached back into today's snapshot (a scheduled resolution cleared a present block or overdue task, a future recovery cleared a standing run of failures, a future reschedule cleared a present overdue deadline, and future-dated events were counted and shown as recent activity). A shared occurrence-time filter now keeps only events that had occurred by the reference, so future reports take no part in the present snapshot and advancing the reference admits them predictably. Aligned the integration recovery boundary with its documentation and the overdue rule (only a recovery strictly later than a failure clears it), and materialised the events iterable once in incident declaration so a one-shot generator is no longer exhausted by the first rule. Added a cross-rule boundary suite, the equal-time and strictly-later recovery cases, a non-UTC reference, and generator/list declaration parity.
 - 2026-09-08 - Corrected the work-state projection behind the overdue and blocked rules (AI-092, reopened): the rules read an entity's single latest event as its current state, so an informational event (one stating neither a status nor a deadline, such as a progress comment) wrongly cleared a blocked, overdue task, and one arriving between two blocked reports reset the blocked duration and lowered the severity from high back to medium. The rules now fold an entity's history into a projected state where informational events are transparent, an omitted deadline on an update keeps the prior one while a terminal state clears it, and the blocked run is traced over each event's effective status so a comment during a block does not restart its clock. Risks still cite the event that set the deadline or began the block. Added unit tests and end-to-end behavioural regressions through risk reporting and a generated brief.
 - 2026-09-07 - Prepared the board and routine for future runs: reopened AI-092 after finding its work-state implementation treats an informational (status-less, deadline-less) event as a state replacement, wrongly clearing a blocked and overdue task and resetting the blocked duration on a later re-report; recorded those as regression scenarios in the AI-092 body for the next implementation run, with the requirement that informational events preserve known state and continuous blocked duration and that the fix distinguish an omitted deadline from an explicitly removed one. Set AI-092, AI-096 and AI-098 Ready, kept AI-093 dependent on the corrected AI-092, and marked AI-101 Blocked on Docker verification with its owner. Added `docs/routine.md`, a standing routine instruction set (resume from the board and ticket bodies, one ticket at a time, verify on the real PR-head and merged-main commits, record blockers, avoid filler), linked from `CLAUDE.md`, and recorded that real-data deployments should exclude `incident_free_text` (carried to AI-112). No application code changed.
@@ -2730,7 +2739,7 @@ it is not picked up and left half-finished.
 - 2026-09-05 - Exposed the generation audit records over HTTP: `GET /brief/audit` audits the current daily brief and `GET /incidents/{incident_id}/audit` audits a tracked incident's summary, so the platform can log or persist the provenance of a generated output (what it was produced from and by, with the confidence and warning codes it reported) without carrying the full output. Each endpoint generates the brief or summary the same way `GET /brief` and `GET /incidents/{incident_id}/summary` do, then projects it into a compact `GenerationAudit`, so the record never disagrees with the output it describes. A provider outage degrades the audited output rather than failing the request, and a missing incident is a 404.
 - 2026-09-04 - Added HTTP editing of an incident's cited events: `POST /incidents/{incident_id}/events` attributes more source events to a tracked incident and `DELETE /incidents/{incident_id}/events/{event_id}` detaches one, so the platform can grow or trim an incident's evidence as the picture develops rather than only fixing it at declaration. Both go through the incident model's link and unlink, so they stay idempotent (linking appends without reordering or duplicating, unlinking ignores an id not cited), a body that fails the contract is a 422, a missing incident a 404, and a change the model refuses (a closed incident, whose evidence is frozen, or an unlink that would leave the incident with no source events) a 409.
 - 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
-- 2026-09-02 - Added severity and opened-time filtering to `GET /incidents`: the listing now takes an optional `severity` filter and inclusive `opened_from` and `opened_to` bounds alongside the existing `status` filter, so the platform can poll just the high-severity incidents, or only those opened in a window, rather than paging every tracked incident and filtering client-side. The bounds carry a timezone offset like an incident's `opened_at` and are normalised to UTC, either may be given alone for an open-ended window, and a window whose start is later than its end is a 422. They are threaded through the store's `list_incidents` and `count` so a filtered listing and its total stay in step.
+
 ## Future Game Center Integration
 
 OpsBrief AI is a standalone open-source service and contains no private,
