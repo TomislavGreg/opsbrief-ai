@@ -51,18 +51,22 @@ def resolve_incident(
     """Resolve the stored incident with ``incident_id`` and persist the change.
 
     The incident is moved to ``resolved`` at ``now`` with the optional note from
-    ``resolution`` recorded, then saved. Returns ``None`` when no incident carries
-    the identifier, so the caller can report a missing incident. An incident that
+    ``resolution`` recorded, read, changed and written back as one atomic store
+    mutation so a concurrent change cannot overwrite it. Returns ``None`` when no
+    incident carries the identifier, so the caller can report a missing incident.
+    An incident that
     cannot move to ``resolved`` (already resolved or closed) raises
     :class:`~opsbrief.incidents.InvalidIncidentTransition` from the incident model,
     which the caller turns into a conflict; the transition rules stay in the
     incident package, not here.
     """
-    incident = store.get(incident_id)
-    if incident is None:
-        return None
-    resolved = incident.transition_to(IncidentStatus.RESOLVED, at=as_utc(now), note=resolution.note)
-    return store.save(resolved)
+    at = as_utc(now)
+    return store.mutate(
+        incident_id,
+        lambda incident: incident.transition_to(
+            IncidentStatus.RESOLVED, at=at, note=resolution.note
+        ),
+    )
 
 
 def transition_incident(
@@ -74,19 +78,21 @@ def transition_incident(
     """Move the stored incident with ``incident_id`` to a new state and persist it.
 
     The incident is moved to ``transition.status`` at ``now``, carrying the optional
-    note when the move ends the incident, then saved. Returns ``None`` when no
-    incident carries the identifier, so the caller can report a missing incident. A
+    note when the move ends the incident, read, changed and written back as one
+    atomic store mutation so a concurrent change cannot overwrite it. Returns
+    ``None`` when no incident carries the identifier, so the caller can report a
+    missing incident. A
     move the lifecycle does not allow raises
     :class:`~opsbrief.incidents.InvalidIncidentTransition`, and a note supplied on a
     reopening raises :class:`ValueError`; both come from the incident model and the
     caller turns them into the right response. The transition rules stay in the
     incident package, not here.
     """
-    incident = store.get(incident_id)
-    if incident is None:
-        return None
-    moved = incident.transition_to(transition.status, at=as_utc(now), note=transition.note)
-    return store.save(moved)
+    at = as_utc(now)
+    return store.mutate(
+        incident_id,
+        lambda incident: incident.transition_to(transition.status, at=at, note=transition.note),
+    )
 
 
 def link_incident_events(
