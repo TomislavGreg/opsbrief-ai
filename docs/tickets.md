@@ -33,11 +33,11 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-096, AI-098 and AI-095; AI-095 became
-eligible now that AI-094 is Done, and AI-093 has landed; AI-101 is Blocked on
-Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
-on a workflow change. AI-092, AI-093 and AI-094 are Done. Read the board, not this
-paragraph, for the current state.
+At the last update the Ready queue was AI-098, AI-095 and AI-097; AI-097 became
+eligible now that AI-096 is Done, and AI-095 now that AI-094 is Done; AI-101 is
+Blocked on Docker verification; AI-124 is Blocked on a maintainer settings action
+and AI-056 on a workflow change. AI-092, AI-093, AI-094 and AI-096 are Done. Read
+the board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -239,6 +239,13 @@ Acceptance criteria:
 ### AI-096: Make incident mutations atomic
 
 Priority P1, Data-loss bug, effort M, Routine. Depends on: none. Finding F05.
+Status: Done. Resolved by routing every incident mutation (resolve, transition,
+link, unlink) through a new `IncidentStore.mutate`, which reads, applies the
+change and writes it back while holding the store lock, so the read-modify-write
+is one atomic step and interleaved mutations to one incident are serialised rather
+than racing. The guarantee is scoped to the one shared store (a single connection
+guarded by its lock) the application runs; separate connections to the same file
+are not covered, which is documented on `mutate` and in the concurrency tests.
 
 Evidence: two concurrent link requests read the same incident, add different event
 ids, both report success, and only one addition is saved. The store lock covers
