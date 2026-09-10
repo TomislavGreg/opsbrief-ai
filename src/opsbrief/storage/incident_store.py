@@ -9,6 +9,7 @@ new declaration) from ``save`` (a change to one that already exists).
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from threading import Lock
 from types import TracebackType
@@ -139,6 +140,36 @@ class IncidentStore:
             if cursor.rowcount == 0:
                 raise IncidentNotFoundError(f"no incident is stored under id {incident.id!r}")
         return incident
+
+    def mutate(self, incident_id: str, mutator: Callable[[Incident], Incident]) -> Incident | None:
+        """Read, transform and persist one incident as a single atomic step.
+
+        ``mutator`` receives the stored incident and returns the changed one; the
+        read, the transformation and the write all happen while the store lock is
+        held, so a concurrent caller cannot read the same incident, change its own
+        copy and overwrite this change in between. This is what a plain
+        :meth:`get` followed by a separate :meth:`save` cannot promise: two
+        interleaved link, unlink, resolve or transition calls would each read the
+        same row and the second save would silently drop the first change. Routed
+        through here they are serialised, so no accepted change is lost.
+
+        Returns ``None`` when no incident carries the identifier, leaving the store
+        untouched, so the caller can report a missing incident. When ``mutator``
+        raises, which is how the incident model refuses a move the lifecycle
+        forbids or an edit its evidence rules reject, the exception propagates and
+        nothing is written, so a rejected mutation leaves the stored row exactly as
+        it was. The mutator must not itself call back into the store, which would
+        deadlock on the held lock; the incident model's own methods do not.
+        """
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                f"{_SELECT} WHERE id = :id", {"id": incident_id}
+            ).fetchone()
+            if row is None:
+                return None
+            updated = mutator(_from_row(row))
+            self._connection.execute(_UPDATE, _to_row(updated))
+        return updated
 
     def get(self, incident_id: str) -> Incident | None:
         """Return the stored incident with ``incident_id``, or ``None`` if there is none."""
