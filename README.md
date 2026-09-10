@@ -2518,7 +2518,7 @@ dashboard evidence links.
 | AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Done |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Ready |
-| AI-096 | Make incident mutations atomic | Correctness and safety | Ready |
+| AI-096 | Make incident mutations atomic | Correctness and safety | In Progress |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Backlog |
 | AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Ready |
 | AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Backlog |

@@ -144,6 +144,40 @@ def test_save_rejects_an_unstored_incident(store: IncidentStore) -> None:
         store.save(make_incident())
 
 
+def test_mutate_applies_and_persists_a_change(store: IncidentStore) -> None:
+    incident = make_incident()
+    store.add(incident)
+
+    returned = store.mutate(
+        incident.id,
+        lambda current: current.link_events(["e20"], at=OPENED_AT + timedelta(minutes=5)),
+    )
+
+    assert returned is not None
+    assert returned.event_ids == ["e17", "e18", "e19", "e20"]
+    assert store.get(incident.id) == returned
+
+
+def test_mutate_returns_none_for_unknown_id(store: IncidentStore) -> None:
+    def unreachable(_: Incident) -> Incident:
+        raise AssertionError("the mutator must not run for a missing incident")
+
+    assert store.mutate("missing", unreachable) is None
+
+
+def test_mutate_leaves_the_row_unchanged_when_the_mutator_raises(store: IncidentStore) -> None:
+    incident = make_incident()
+    store.add(incident)
+
+    def boom(current: Incident) -> Incident:
+        raise ValueError("rejected")
+
+    with pytest.raises(ValueError, match="rejected"):
+        store.mutate(incident.id, boom)
+
+    assert store.get(incident.id) == incident
+
+
 def test_list_returns_most_recently_opened_first(store: IncidentStore) -> None:
     older = make_incident(incident_id="inc-old", at=OPENED_AT)
     newer = make_incident(incident_id="inc-new", at=OPENED_AT + timedelta(hours=1))
