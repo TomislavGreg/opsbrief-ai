@@ -35,6 +35,12 @@ _INSERT = (
 
 _SELECT = f"SELECT {', '.join(_COLUMNS)} FROM events"
 
+#: The stable listing order shared by every read that returns events, so a page,
+#: a whole-history read and their total all walk the rows the same way. Ties on
+#: ``occurred_at`` are broken by ``received_at`` and then ``id`` so the order is
+#: total and repeatable.
+_ORDER = "ORDER BY occurred_at DESC, received_at DESC, id DESC"
+
 
 class DuplicateEventIdError(Exception):
     """Raised when an event is stored under an identifier already in use."""
@@ -337,11 +343,41 @@ class EventStore:
         params["offset"] = offset
         with self._lock:
             rows = self._connection.execute(
-                f"{_SELECT}{clause} "
-                "ORDER BY occurred_at DESC, received_at DESC, id DESC "
-                "LIMIT :limit OFFSET :offset",
+                f"{_SELECT}{clause} {_ORDER} LIMIT :limit OFFSET :offset",
                 params,
             ).fetchall()
+        return [_from_row(row) for row in rows]
+
+    def list_all_events(
+        self,
+        *,
+        source: str | None = None,
+        event_type: str | None = None,
+        severity: EventSeverity | None = None,
+        status: EventStatus | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        occurred_from: datetime | None = None,
+        occurred_to: datetime | None = None,
+    ) -> list[Event]:
+        """Return every matching event from one snapshot, most recently occurred first.
+
+        This is :meth:`list_events` without paging: it takes the same optional
+        filters but no ``limit`` or ``offset`` and returns the whole matching
+        history in one ordered SELECT under a single hold of the store lock. A
+        whole-history read therefore sees one coherent snapshot rather than
+        stitching separate pages, so a write that lands between what would have
+        been two pages can no longer shift the offset window and make the read
+        drop or repeat a row. The order is :meth:`list_events`' order, so an
+        offset page is a prefix of this same walk.
+        """
+        clause, params = _where(
+            _filters(source, event_type, severity, status, entity_type, entity_id),
+            occurred_from,
+            occurred_to,
+        )
+        with self._lock:
+            rows = self._connection.execute(f"{_SELECT}{clause} {_ORDER}", params).fetchall()
         return [_from_row(row) for row in rows]
 
     def count(
@@ -375,6 +411,55 @@ class EventStore:
                     0
                 ]
             )
+
+    def list_page(
+        self,
+        *,
+        source: str | None = None,
+        event_type: str | None = None,
+        severity: EventSeverity | None = None,
+        status: EventStatus | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        occurred_from: datetime | None = None,
+        occurred_to: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[Event], int]:
+        """Return one page of matching events and the total match count together.
+
+        The page and the total are read under a single hold of the store lock, so
+        they reflect the same committed state: within one request the total never
+        disagrees with the page because a write landed between two separate reads.
+        The arguments and result are :meth:`list_events`' page and :meth:`count`'s
+        total, combined so a caller assembling a page need not read them apart.
+
+        Offset paging across separate requests is still subject to a write shifting
+        rows between one request and the next, which is inherent to offset
+        pagination; a caller that must see the whole history from one snapshot uses
+        :meth:`list_all_events` instead.
+        """
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+        clause, params = _where(
+            _filters(source, event_type, severity, status, entity_type, entity_id),
+            occurred_from,
+            occurred_to,
+        )
+        page_params = {**params, "limit": limit, "offset": offset}
+        with self._lock:
+            rows = self._connection.execute(
+                f"{_SELECT}{clause} {_ORDER} LIMIT :limit OFFSET :offset",
+                page_params,
+            ).fetchall()
+            total = int(
+                self._connection.execute(f"SELECT COUNT(*) FROM events{clause}", params).fetchone()[
+                    0
+                ]
+            )
+        return [_from_row(row) for row in rows], total
 
     def close(self) -> None:
         """Close the underlying connection."""

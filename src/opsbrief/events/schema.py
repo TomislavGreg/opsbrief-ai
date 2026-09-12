@@ -227,6 +227,14 @@ class EventQuery(BaseModel):
     Every filter is optional and matches its column exactly; an omitted filter
     does not narrow the result. Unknown fields are rejected so a mistyped filter
     fails loudly instead of being silently ignored and returning the wrong page.
+
+    A page and its total are read from one store snapshot, so within a single
+    request they agree. Paging with ``limit`` and ``offset`` across separate
+    requests is stable only while the matching events do not change: an event
+    inserted or removed between two requests shifts the offset window, so a
+    caller walking every page can see a row twice or miss one. That is inherent
+    to offset pagination; a consumer that needs the whole history from one
+    coherent snapshot reads it in a single request rather than paging.
     """
 
     model_config = ConfigDict(extra="forbid")
