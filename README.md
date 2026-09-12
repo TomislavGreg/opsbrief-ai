@@ -42,6 +42,14 @@ produced it.
   metadata.
 - SQLite persistence for events: a store that writes an event and reads it
   back unchanged, with UTC timestamps and typed metadata preserved.
+- Snapshot-consistent reporting reads: the risk, brief, incident and dashboard
+  services judge against the whole event history read in one query under a single
+  hold of the store lock, rather than gathering separate offset pages a concurrent
+  write could shift, so a write cannot make a whole-history read drop the new event
+  and repeat one on a page boundary. A paged `/events` listing reads its page and
+  its total together the same way, so within a request the total agrees with the
+  page. Offset paging across separate requests stays subject to inserts shifting
+  rows, which is inherent to offset pagination and left in place.
 - A `POST /events` endpoint that validates one submitted event, assigns it an
   identifier and stores it, recognising a resubmission carrying an
   `external_id` the same source has already sent rather than storing it twice.
@@ -1237,7 +1245,13 @@ starts, both against the same configured database, and closes them when it
 stops, so requests share a connection per store. Access is guarded by a lock,
 because a SQLite connection is not safe to share across the threads FastAPI
 runs synchronous handlers in. `list_events` and `count` take the same optional
-column filters, so a filtered listing and its total stay in step. `add_or_get`
+column filters, so a filtered listing and its total stay in step; `list_page`
+reads one page and its total together under a single hold of the lock, so within a
+request the total cannot count a write the page did not see. A service that judges
+against the whole history reads it through `list_all_events`, one ordered SELECT
+under a single lock hold, rather than gathering offset pages a concurrent write
+could shift between; ordinary offset paging stays stable only within a request.
+`add_or_get`
 stores an event unless one is already stored under the same `(source,
 external_id)`, in which case it returns that event; the lookup and the insert
 run under the same lock, so two concurrent resubmissions cannot both be stored.
@@ -2528,8 +2542,8 @@ dashboard evidence links.
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Ready |
 | AI-096 | Make incident mutations atomic | Correctness and safety | Done |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Ready |
-| AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Ready |
-| AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Backlog |
+| AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Done |
+| AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Ready |
 | AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Backlog |
 | AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Blocked |
 | AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Backlog |
@@ -2571,8 +2585,8 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-098, AI-095 and AI-097; AI-097 became eligible now that AI-096 is Done, and
-AI-095 now that AI-094 is Done.
+AI-099, AI-095 and AI-097; AI-099 was promoted now that AI-098 is Done, AI-097
+became eligible once AI-096 was Done, and AI-095 once AI-094 was Done.
 
 AI-092 was reopened after its first implementation and is now Done again. The
 first implementation grouped work by entity but read the single latest event as
@@ -2725,6 +2739,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-12 - Read the reporting history from one stable SQLite snapshot (AI-098): the risk, brief, incident and dashboard services gathered the whole event history a page at a time, taking the store lock separately for each 500-row page, so an event inserted between two page reads shifted the newest-first order under the reader and the read returned a row twice while omitting the new event. Added `EventStore.list_all_events`, which returns the whole matching history in one ordered SELECT under a single hold of the lock, and read the history through it, so a whole-history read now sees one coherent snapshot with no gaps or repeats. Added `EventStore.list_page`, which reads a page and its total together under one lock hold, and assembled the `/events` listing through it so a request's total agrees with its page. Added boundary tests around the former page size and barrier-released concurrency tests over a shared store. The cross-request limitation of public offset paging is documented and left in place, since it is inherent to offset pagination.
 - 2026-09-10 - Made incident mutations atomic (AI-096): resolving, transitioning, linking and unlinking an incident read the record and wrote it back in two separate lock acquisitions, so two changes arriving at once for the same incident each read the same row and the later save silently dropped the earlier change while both callers saw success. Added `IncidentStore.mutate`, which reads, applies the change and writes it back under one held lock, and routed all four services through it, so concurrent mutations to one incident are serialised and none is lost; a rejected change still raises from the incident model and leaves the stored row untouched. Added store unit tests for the found, missing and rejected cases and barrier-released concurrency tests over a shared file-backed store, reopened to confirm the persisted outcome. The guarantee is scoped to the one shared store the service runs, which is documented.
 - 2026-09-09 - Applied one reference-instant boundary across the risk rules and the daily-brief context (AI-093): the overdue, blocked and repeated-integration-failure rules and the brief context folded in events dated after the instant the picture is judged against, so a future report reached back into today's snapshot (a scheduled resolution cleared a present block or overdue task, a future recovery cleared a standing run of failures, a future reschedule cleared a present overdue deadline, and future-dated events were counted and shown as recent activity). A shared occurrence-time filter now keeps only events that had occurred by the reference, so future reports take no part in the present snapshot and advancing the reference admits them predictably. Aligned the integration recovery boundary with its documentation and the overdue rule (only a recovery strictly later than a failure clears it), and materialised the events iterable once in incident declaration so a one-shot generator is no longer exhausted by the first rule. Added a cross-rule boundary suite, the equal-time and strictly-later recovery cases, a non-UTC reference, and generator/list declaration parity.
 - 2026-09-08 - Corrected the work-state projection behind the overdue and blocked rules (AI-092, reopened): the rules read an entity's single latest event as its current state, so an informational event (one stating neither a status nor a deadline, such as a progress comment) wrongly cleared a blocked, overdue task, and one arriving between two blocked reports reset the blocked duration and lowered the severity from high back to medium. The rules now fold an entity's history into a projected state where informational events are transparent, an omitted deadline on an update keeps the prior one while a terminal state clears it, and the blocked run is traced over each event's effective status so a comment during a block does not restart its clock. Risks still cite the event that set the deadline or began the block. Added unit tests and end-to-end behavioural regressions through risk reporting and a generated brief.

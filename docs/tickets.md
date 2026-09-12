@@ -33,11 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-098, AI-095 and AI-097; AI-097 became
-eligible now that AI-096 is Done, and AI-095 now that AI-094 is Done; AI-101 is
-Blocked on Docker verification; AI-124 is Blocked on a maintainer settings action
-and AI-056 on a workflow change. AI-092, AI-093, AI-094 and AI-096 are Done. Read
-the board, not this paragraph, for the current state.
+At the last update the Ready queue was AI-099, AI-095 and AI-097; AI-099 was
+promoted from Backlog now that AI-098 is Done, AI-097 became eligible once AI-096
+was Done, and AI-095 once AI-094 was Done; AI-101 is Blocked on Docker
+verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
+workflow change. AI-092, AI-093, AI-094, AI-096 and AI-098 are Done. Read the
+board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -293,6 +294,16 @@ Acceptance criteria:
 ### AI-098: Read reporting history from a stable SQLite snapshot
 
 Priority P1, Correctness bug, effort M, Routine. Depends on: none. Finding F07.
+Status: Done. Resolved by adding `EventStore.list_all_events`, which returns the
+whole matching history in one ordered SELECT under a single hold of the store
+lock, and reading the history through it instead of accumulating offset pages, so
+a write can no longer land between two page reads and shift the newest-first
+window under the reader. Added `EventStore.list_page`, which reads a page and its
+total together under one lock hold, and assembled the `/events` listing through
+it so a request's total agrees with its page. The guarantee is scoped to the one
+shared store the application runs, as AI-096 is; the cross-request limitation of
+public offset paging is documented on `EventQuery` and `list_page`, and left in
+place because it is inherent to offset pagination.
 
 Evidence: inserting a new newest event between the first and second 500-row pages
 returned 502 rows with 501 distinct ids and omitted the new event. Stable ordering
