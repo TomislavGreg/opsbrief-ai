@@ -22,9 +22,11 @@ def list_events(store: EventStore, query: EventQuery) -> EventPage:
 
     The page carries the events themselves alongside the total number of matches
     across all pages, so a caller can tell whether more pages remain without
-    fetching them.
+    fetching them. The rows and the total are read from one store snapshot, so
+    within a request the total agrees with the page rather than counting a write
+    that the page did not see.
     """
-    events = store.list_events(
+    events, total = store.list_page(
         source=query.source,
         event_type=query.event_type,
         severity=query.severity,
@@ -35,15 +37,5 @@ def list_events(store: EventStore, query: EventQuery) -> EventPage:
         occurred_to=query.occurred_to,
         limit=query.limit,
         offset=query.offset,
-    )
-    total = store.count(
-        source=query.source,
-        event_type=query.event_type,
-        severity=query.severity,
-        status=query.status,
-        entity_type=query.entity_type,
-        entity_id=query.entity_id,
-        occurred_from=query.occurred_from,
-        occurred_to=query.occurred_to,
     )
     return EventPage(total=total, limit=query.limit, offset=query.offset, events=events)
