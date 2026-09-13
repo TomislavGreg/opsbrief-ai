@@ -4,8 +4,10 @@
 ingestion the service already has. It reuses the existing event contract, so a
 delivery is validated, redacted and deduplicated by exactly the same code path a
 direct ``POST /events/batch`` submission is. The only work unique to the webhook
-is authenticating the caller: the body is size-bounded, the HMAC signature is
-verified over the raw bytes, and only then is the body parsed and stored.
+is authenticating the caller: the body is size-bounded (by the application-wide
+:class:`~opsbrief.api.limits.MaxBodySizeMiddleware`, before this handler is reached),
+the HMAC signature is verified over the raw bytes, and only then is the body decoded
+and parsed.
 """
 
 import json
@@ -25,30 +27,7 @@ from opsbrief.webhooks import (
     verify_webhook_signature,
 )
 
-#: Largest webhook body accepted, checked before the body is verified or parsed so
-#: an oversized payload is refused with 413 rather than exhausting memory. A full
-#: 500-event batch of maximal events fits comfortably under this bound.
-MAX_WEBHOOK_BODY_BYTES = 8 * 1024 * 1024
-
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
-
-
-def _reject_if_too_large(declared_length: str | None, actual_length: int) -> None:
-    """Refuse a body that exceeds the size bound, by declared or actual length."""
-    if declared_length is not None:
-        try:
-            if int(declared_length) > MAX_WEBHOOK_BODY_BYTES:
-                raise HTTPException(
-                    status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail="webhook body exceeds the maximum size",
-                )
-        except ValueError:
-            pass  # A malformed Content-Length is caught by the actual-length check.
-    if actual_length > MAX_WEBHOOK_BODY_BYTES:
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="webhook body exceeds the maximum size",
-        )
 
 
 @router.post(
@@ -72,19 +51,18 @@ async def ingest_events(
 
     The webhook is disabled unless a secret is configured, so an unconfigured
     deployment answers 404 and never takes an unauthenticated write. A configured
-    deployment size-bounds the body (413), verifies the HMAC signature over the
-    raw bytes (401 on any failure), then validates the body through the existing
-    batch contract (422 on failure) and stores it, answering 202 with the same
-    result a direct batch submission returns. Retried deliveries are recognised by
-    the existing ``(source, external_id)`` deduplication, so ``count`` reports only
-    what was newly stored.
+    deployment size-bounds the body (413, before this handler runs), verifies the
+    HMAC signature over the raw bytes (401 on any failure), then decodes and
+    validates the body through the existing batch contract (422 on failure) and
+    stores it, answering 202 with the same result a direct batch submission returns.
+    Retried deliveries are recognised by the existing ``(source, external_id)``
+    deduplication, so ``count`` reports only what was newly stored.
     """
     settings = get_settings()
     if not settings.webhook_enabled():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="the webhook is not configured")
 
     body = await request.body()
-    _reject_if_too_large(request.headers.get("content-length"), len(body))
 
     try:
         verify_webhook_signature(
@@ -98,8 +76,19 @@ async def ingest_events(
     except WebhookAuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=exc.reason) from exc
 
+    # The signature is over the raw bytes, so it is verified before the body is
+    # decoded. A validly signed but malformed body is a client error, not a server
+    # one: invalid UTF-8 and invalid JSON are each mapped to 422 rather than raising.
     try:
-        payload = json.loads(body)
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="webhook body is not valid UTF-8",
+        ) from exc
+
+    try:
+        payload = json.loads(text)
     except json.JSONDecodeError as exc:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

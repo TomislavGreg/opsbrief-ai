@@ -175,10 +175,30 @@ def test_an_empty_batch_is_rejected(webhook_client: TestClient) -> None:
 def test_an_oversized_body_is_rejected(
     webhook_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("opsbrief.api.webhooks.MAX_WEBHOOK_BODY_BYTES", 10)
+    # The size bound is enforced by the application-wide body-limit middleware,
+    # which reads the module default live, so lowering it takes effect at once.
+    monkeypatch.setattr("opsbrief.api.limits.MAX_REQUEST_BODY_BYTES", 10)
     response = deliver(webhook_client, [event()])
 
     assert response.status_code == 413
+    assert webhook_client.get("/events").json()["total"] == 0
+
+
+def test_a_signed_invalid_utf8_body_is_rejected(webhook_client: TestClient) -> None:
+    # A correctly signed body that is not valid UTF-8 is a client error (422), not a
+    # server error: the signature is verified over the raw bytes, then decoding fails.
+    body = b'{"events": ["\xff"]}'
+    stamp = str(int(time.time()))
+    response = webhook_client.post(
+        "/webhooks/events",
+        content=body,
+        headers={
+            TIMESTAMP_HEADER: stamp,
+            SIGNATURE_HEADER: compute_signature(SECRET, stamp, body),
+        },
+    )
+
+    assert response.status_code == 422
     assert webhook_client.get("/events").json()["total"] == 0
 
 
