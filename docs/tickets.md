@@ -33,12 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-099, AI-095 and AI-097; AI-099 was
-promoted from Backlog now that AI-098 is Done, AI-097 became eligible once AI-096
+At the last update the Ready queue was AI-095, AI-097 and AI-100; AI-100 was
+promoted from Backlog now that AI-099 is Done, AI-097 became eligible once AI-096
 was Done, and AI-095 once AI-094 was Done; AI-101 is Blocked on Docker
 verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
-workflow change. AI-092, AI-093, AI-094, AI-096 and AI-098 are Done. Read the
-board, not this paragraph, for the current state.
+workflow change. AI-092, AI-093, AI-094, AI-096, AI-098 and AI-099 are Done. Read
+the board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -327,6 +327,23 @@ Acceptance criteria:
 ### AI-099: Bound incoming bytes before parsing and handle malformed webhook bodies
 
 Priority P1, Availability/input bug, effort M, Routine. Depends on: none. Finding F08.
+Status: Done. Resolved by `opsbrief.api.limits.MaxBodySizeMiddleware`, a pure ASGI
+middleware wired into the application ahead of the routers. It refuses a body whose
+declared `Content-Length` already exceeds `MAX_REQUEST_BODY_BYTES` before reading
+anything, and otherwise counts the streamed bytes and stops at the bound plus at most
+the one chunk that crosses it, answering 413 without the handler seeing the body. The
+bound applies uniformly to the event, batch, incident and webhook write paths rather
+than only the webhook, so a body sent without a `Content-Length` header is no longer
+read in full before a limit applies, and Pydantic's after-parsing limits are no
+longer the only bound. The webhook's own after-the-fact size check was removed in
+favour of the middleware, and the webhook now decodes the raw bytes explicitly after
+verifying the signature: invalid UTF-8 and invalid JSON are each mapped to 422, so a
+validly signed malformed payload is a client error rather than the previous 500. The
+byte bound is documented as distinct from the event-count and field-character limits
+in the README and `docs/webhook-ingestion.md`. Covered by
+`tests/test_request_body_limit.py` (declared, exact, streamed and chunked bodies, an
+ASGI-level early-stop check, and the bound over the event, batch and incident paths)
+and a signed invalid-UTF-8 regression in `tests/test_webhooks_api.py`.
 
 Evidence: a body without `Content-Length` is fully consumed before the 8 MiB check
 (a probe consumed 12 MiB before 413); a validly signed invalid-UTF-8 body returns

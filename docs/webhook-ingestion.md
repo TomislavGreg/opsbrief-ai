@@ -58,10 +58,21 @@ Failures are reported by status so a caller can tell them apart:
 | `202 Accepted` | Delivery authenticated and stored. |
 | `401 Unauthorized` | Missing, malformed, expired or mismatched signature. |
 | `413 Payload Too Large` | Body exceeds the configured size bound. |
-| `422 Unprocessable Entity` | Body failed the event contract; nothing stored. |
+| `422 Unprocessable Entity` | Body is not valid UTF-8 or JSON, or failed the event contract; nothing stored. |
 
 The body of an error names the field or reason at fault, as the existing
 endpoints already do, and never echoes the secret or the computed signature.
+
+The size bound is on the encoded request bytes and is enforced before the body is
+verified or parsed, by the same application-wide limit that covers every write path.
+A body whose declared `Content-Length` exceeds the bound is refused up front, and a
+streamed body with no `Content-Length` is counted as it arrives and stopped once it
+crosses the bound, so an oversized or unbounded payload is never read into memory in
+full. This byte bound is separate from the event-count limit (at most 500 events per
+batch) and the per-field character limits the event contract enforces after parsing.
+Because the signature is verified over the raw bytes before decoding, a validly
+signed body that is not valid UTF-8 or JSON is a `422` client error, not a server
+error.
 
 ## Authentication
 

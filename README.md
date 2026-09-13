@@ -64,6 +64,15 @@ produced it.
   deduplicated path a direct submission uses. It is disabled, answering 404, unless
   a secret is configured, so an unconfigured deployment never takes an
   unauthenticated write.
+- A request-size bound on every write path: an application-wide middleware caps the
+  encoded bytes of a request body before any router parses it, refusing a body whose
+  declared `Content-Length` exceeds the cap up front and counting a streamed body
+  (one sent without a `Content-Length`, for example) as it arrives, stopping at the
+  cap plus at most the one chunk that crosses it. An over-limit event, batch,
+  incident or webhook request is answered with `413` before it is parsed, so nothing
+  is read into memory in full or stored. The bound is on encoded bytes and is
+  separate from the event-count limit (at most 500 events per batch) and the
+  per-field character limits the event contract enforces after parsing.
 - A `GET /events` endpoint that lists stored events newest first, filtered by
   source, type, severity or status, narrowed to a single entity with
   `entity_type` and `entity_id` or to an occurrence-time window with
@@ -697,8 +706,9 @@ curl -X POST http://127.0.0.1:8000/webhooks/events \
 
 On success the service answers `202 Accepted` with the same `count` and stored
 events `POST /events/batch` returns. A missing, malformed, expired or mismatched
-signature is `401`, a body over the size bound is `413`, and a body that fails the
-event contract is `422` with nothing stored. When `OPSBRIEF_WEBHOOK_SECRET` is
+signature is `401`, a body over the size bound is `413`, and a malformed body
+(invalid UTF-8 or JSON, or one that fails the event contract) is `422` with nothing
+stored. When `OPSBRIEF_WEBHOOK_SECRET` is
 unset the route is disabled and answers `404`. See
 [Webhook Ingestion](#webhook-ingestion) for the authentication scheme.
 
@@ -1339,14 +1349,20 @@ The shared secret is read from `OPSBRIEF_WEBHOOK_SECRET` and never lives in the
 repository. When it is unset the route is disabled and answers `404`, so an
 unconfigured deployment never accepts an unauthenticated write; when it is set it
 must be at least 16 characters, enforced when the settings are read. The body is
-size-bounded before it is verified, so an oversized payload is refused with `413`
-rather than read fully and parsed. Input stays untrusted: the signature proves who
-sent the body, not that it is well-formed, so every event is still validated by
-the Pydantic contract, redacted for sensitive metadata, and constrained exactly as
-a direct submission is. On success the endpoint answers `202 Accepted` with the
-same `count` and stored events `POST /events/batch` returns; a signature failure
-is `401`, an oversized body `413`, and a body that fails the event contract `422`
-with nothing stored. Per-producer secrets, key rotation and multiple active
+size-bounded before it is verified or parsed, by the same application-wide bound
+that covers every write path, so an oversized payload, or one sent without a
+`Content-Length` header, is refused with `413` rather than read into memory in full.
+That bound is on the encoded request bytes; it is separate from the event-count
+limit (at most 500 events per batch) and the per-field character limits the event
+contract enforces after parsing. Input stays untrusted: the signature proves who
+sent the body, not that it is well-formed, so a validly signed body that is not
+valid UTF-8 or JSON is a `422` client error (verified over the raw bytes first, then
+decoded), and every event is still validated by the Pydantic contract, redacted for
+sensitive metadata, and constrained exactly as a direct submission is. On success
+the endpoint answers `202 Accepted` with the same `count` and stored events
+`POST /events/batch` returns; a signature failure is `401`, an oversized body `413`,
+and a malformed body (invalid UTF-8 or JSON, or one that fails the event contract)
+`422` with nothing stored. Per-producer secrets, key rotation and multiple active
 secrets are out of scope for now; the `sha256=` prefix leaves room for a future
 scheme without breaking existing senders.
 
@@ -2543,8 +2559,8 @@ dashboard evidence links.
 | AI-096 | Make incident mutations atomic | Correctness and safety | Done |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Ready |
 | AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Done |
-| AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Ready |
-| AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Backlog |
+| AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Done |
+| AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Ready |
 | AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Blocked |
 | AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Backlog |
 | AI-103 | Validate configuration at startup and make readiness truthful | Correctness and safety | Backlog |
@@ -2585,7 +2601,7 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-099, AI-095 and AI-097; AI-099 was promoted now that AI-098 is Done, AI-097
+AI-095, AI-097 and AI-100; AI-100 was promoted now that AI-099 is Done, AI-097
 became eligible once AI-096 was Done, and AI-095 once AI-094 was Done.
 
 AI-092 was reopened after its first implementation and is now Done again. The
@@ -2739,6 +2755,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-13 - Bounded incoming request bytes before parsing and handled malformed webhook bodies (AI-099): the webhook read the whole body into memory before checking its size, so a body sent without a `Content-Length` header was fully consumed before the bound applied, and the event, batch and incident write paths had no byte bound at all because Pydantic only limits a body after parsing; separately, a validly signed body that was not valid UTF-8 returned 500 because only invalid JSON was handled. Added `MaxBodySizeMiddleware`, a pure ASGI middleware wired ahead of the routers that refuses a body whose declared `Content-Length` exceeds the bound up front and counts a streamed body as it arrives, stopping at the bound plus at most the one crossing chunk and answering 413 before the body is parsed or stored, uniformly across the event, batch, incident and webhook paths. Removed the webhook's own after-the-fact size check in favour of it, and made the webhook decode the raw bytes explicitly after verifying the signature, mapping invalid UTF-8 and invalid JSON each to 422 so a signed malformed payload is a client error. Documented the byte bound as distinct from the event-count and field-character limits. Added middleware unit tests, write-path coverage and a signed invalid-UTF-8 regression.
 - 2026-09-12 - Read the reporting history from one stable SQLite snapshot (AI-098): the risk, brief, incident and dashboard services gathered the whole event history a page at a time, taking the store lock separately for each 500-row page, so an event inserted between two page reads shifted the newest-first order under the reader and the read returned a row twice while omitting the new event. Added `EventStore.list_all_events`, which returns the whole matching history in one ordered SELECT under a single hold of the lock, and read the history through it, so a whole-history read now sees one coherent snapshot with no gaps or repeats. Added `EventStore.list_page`, which reads a page and its total together under one lock hold, and assembled the `/events` listing through it so a request's total agrees with its page. Added boundary tests around the former page size and barrier-released concurrency tests over a shared store. The cross-request limitation of public offset paging is documented and left in place, since it is inherent to offset pagination.
 - 2026-09-10 - Made incident mutations atomic (AI-096): resolving, transitioning, linking and unlinking an incident read the record and wrote it back in two separate lock acquisitions, so two changes arriving at once for the same incident each read the same row and the later save silently dropped the earlier change while both callers saw success. Added `IncidentStore.mutate`, which reads, applies the change and writes it back under one held lock, and routed all four services through it, so concurrent mutations to one incident are serialised and none is lost; a rejected change still raises from the incident model and leaves the stored row untouched. Added store unit tests for the found, missing and rejected cases and barrier-released concurrency tests over a shared file-backed store, reopened to confirm the persisted outcome. The guarantee is scoped to the one shared store the service runs, which is documented.
 - 2026-09-09 - Applied one reference-instant boundary across the risk rules and the daily-brief context (AI-093): the overdue, blocked and repeated-integration-failure rules and the brief context folded in events dated after the instant the picture is judged against, so a future report reached back into today's snapshot (a scheduled resolution cleared a present block or overdue task, a future recovery cleared a standing run of failures, a future reschedule cleared a present overdue deadline, and future-dated events were counted and shown as recent activity). A shared occurrence-time filter now keeps only events that had occurred by the reference, so future reports take no part in the present snapshot and advancing the reference admits them predictably. Aligned the integration recovery boundary with its documentation and the overdue rule (only a recovery strictly later than a failure clears it), and materialised the events iterable once in incident declaration so a one-shot generator is no longer exhausted by the first rule. Added a cross-rule boundary suite, the equal-time and strictly-later recovery cases, a non-UTC reference, and generator/list declaration parity.
@@ -2752,8 +2769,6 @@ it is not picked up and left half-finished.
 - 2026-09-06 - Added severity and rule filtering to `GET /risks`: the endpoint now takes optional `severity` and `rule` query parameters, so a caller can poll just the critical risks, or only those from one rule, rather than fetching the whole snapshot and filtering client-side. The filters are threaded through a `RiskQuery` model and applied after the risks are ranked, so they never change detection or the order of what remains, and an omitted filter returns the whole picture as before. `generated_at` still records the instant the whole snapshot was judged against. The endpoint now validates its parameters, so an unknown severity or a stray parameter is a 422 rather than silently ignored. This completes the read-path filtering AI-083 and AI-084 began for the event and incident listings.
 - 2026-09-05 - Added a suggested-next-actions panel to the dashboard: `GET /dashboard` now renders the brief's suggested next actions inline below the active risks, one per active risk in the same priority order, so a duty manager sees not just what the risks are but what to do about them. Each action shows the risk's severity as a badge, the recommended step, the risk it addresses, the rule behind it and the source events it traces to, carried straight from the brief's deterministic actions so a suggestion traces to the same evidence as its risk and no model decides it. No active risks shows the same all-clear empty state the risks panel does, and every field is escaped as it is placed.
 - 2026-09-05 - Exposed the generation audit records over HTTP: `GET /brief/audit` audits the current daily brief and `GET /incidents/{incident_id}/audit` audits a tracked incident's summary, so the platform can log or persist the provenance of a generated output (what it was produced from and by, with the confidence and warning codes it reported) without carrying the full output. Each endpoint generates the brief or summary the same way `GET /brief` and `GET /incidents/{incident_id}/summary` do, then projects it into a compact `GenerationAudit`, so the record never disagrees with the output it describes. A provider outage degrades the audited output rather than failing the request, and a missing incident is a 404.
-- 2026-09-04 - Added HTTP editing of an incident's cited events: `POST /incidents/{incident_id}/events` attributes more source events to a tracked incident and `DELETE /incidents/{incident_id}/events/{event_id}` detaches one, so the platform can grow or trim an incident's evidence as the picture develops rather than only fixing it at declaration. Both go through the incident model's link and unlink, so they stay idempotent (linking appends without reordering or duplicating, unlinking ignores an id not cited), a body that fails the contract is a 422, a missing incident a 404, and a change the model refuses (a closed incident, whose evidence is frozen, or an unlink that would leave the incident with no source events) a 409.
-- 2026-09-03 - Added an incident status-transition endpoint, `POST /incidents/{incident_id}/transition`: it moves a tracked incident to any lifecycle state its current state allows, so the platform can drive a disruption through investigation, monitoring and closure, or reopen a resolved one, not only declare and resolve it over HTTP. The allowed moves are the deterministic incident lifecycle's, applied through the incident model's `transition_to`, so a move it forbids (repeating the current state, or moving out of the terminal `closed`) is a 409, a missing incident a 404, and a note given on a move that reopens the incident a 422. An optional note is recorded on a move that ends the incident; resolving with a note keeps its own `POST /incidents/{incident_id}/resolution` endpoint, and this one reaches every state uniformly.
 
 ## Future Game Center Integration
 
