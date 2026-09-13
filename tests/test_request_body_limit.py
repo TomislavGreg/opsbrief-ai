@@ -1,6 +1,7 @@
 """Tests for the request body size limiting middleware."""
 
 import asyncio
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -9,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from opsbrief.api import limits
 from opsbrief.api.limits import MaxBodySizeMiddleware
+from opsbrief.config import get_settings
+from opsbrief.main import create_app
 
 
 def build_app(max_bytes: int | None = None) -> FastAPI:
@@ -137,3 +140,62 @@ def test_a_get_request_without_a_body_is_untouched(client: TestClient) -> None:
 
     with TestClient(app) as get_client:
         assert get_client.get("/ping").json() == {"ok": True}
+
+
+def _make_app_client(monkeypatch: pytest.MonkeyPatch, max_bytes: int | None) -> TestClient:
+    """Return a client for the real application, optionally with a lowered bound."""
+    monkeypatch.setenv("OPSBRIEF_DATABASE_URL", "sqlite:///:memory:")
+    if max_bytes is not None:
+        monkeypatch.setattr(limits, "MAX_REQUEST_BODY_BYTES", max_bytes)
+    get_settings.cache_clear()
+    return TestClient(create_app())
+
+
+def _valid_event() -> dict[str, object]:
+    return {
+        "source": "rostering",
+        "event_type": "shift.unfilled",
+        "subject": "Steward shift for fixture 4821 is one short",
+        "occurred_at": "2026-07-29T09:30:00Z",
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/events", _valid_event()),
+        ("/events/batch", {"events": [_valid_event()]}),
+        ("/incidents", {"title": "Ticketing down", "severity": "high", "event_ids": ["e1"]}),
+    ],
+)
+def test_the_byte_bound_covers_the_write_paths(
+    monkeypatch: pytest.MonkeyPatch, path: str, payload: dict[str, object]
+) -> None:
+    # The same byte policy applies to the ordinary event, batch and incident write
+    # paths, not only the webhook, and a body over the bound is refused with 413
+    # before it is parsed, so nothing is stored.
+    with _make_app_client(monkeypatch, max_bytes=16) as client:
+        response = client.post(
+            path,
+            content=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+
+        assert response.status_code == 413
+        assert client.get("/events").json()["total"] == 0
+        assert client.get("/incidents").json()["total"] == 0
+    get_settings.cache_clear()
+
+
+def test_a_write_within_the_bound_still_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Under the ordinary bound a valid event is parsed and stored as usual, so the
+    # byte policy never rejects a request that fits.
+    with _make_app_client(monkeypatch, max_bytes=None) as client:
+        response = client.post(
+            "/events",
+            content=json.dumps(_valid_event()).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+
+        assert response.status_code == 201
+    get_settings.cache_clear()
