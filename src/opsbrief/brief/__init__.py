@@ -14,7 +14,12 @@ from opsbrief.brief.actions import (
     suggest_next_actions,
 )
 from opsbrief.brief.context import DEFAULT_RECENT_EVENTS, build_brief_context
-from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render_context
+from opsbrief.brief.generate import (
+    DEFAULT_INSTRUCTIONS,
+    build_brief_material,
+    generate_brief,
+    render_context,
+)
 from opsbrief.brief.schema import (
     BRIEF_OUTPUT_VERSION,
     BRIEF_PROMPT_VERSION,
@@ -41,6 +46,7 @@ __all__ = [
     "NextAction",
     "WarningCode",
     "build_brief_context",
+    "build_brief_material",
     "generate_brief",
     "render_context",
     "suggest_next_actions",

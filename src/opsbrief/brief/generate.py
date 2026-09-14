@@ -14,10 +14,9 @@ part of a brief, exactly as any other external data would be.
 """
 
 import re
-from collections.abc import Container, Sequence
+from collections.abc import Callable, Container
 
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
-from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.brief.schema import (
     BRIEF_OUTPUT_VERSION,
     BRIEF_PROMPT_VERSION,
@@ -27,6 +26,7 @@ from opsbrief.brief.schema import (
     EventDigest,
 )
 from opsbrief.exclusion import shown_risk_title, shown_value
+from opsbrief.prompt_budget import BudgetedMaterial, Section, render_budgeted
 from opsbrief.risks import Risk
 from opsbrief.warnings import GenerationWarning, WarningCode
 
@@ -89,44 +89,85 @@ def _render_event(digest: EventDigest, excluded_fields: Container[str]) -> str:
     return f"- {occurred} [{severity}] {source} {event_type}: {subject} (status: {status})"
 
 
-def _render_section(title: str, lines: Sequence[str]) -> list[str]:
-    """Render a titled block, or a plain 'none' line when it is empty."""
-    if not lines:
-        return [f"{title}: none."]
-    return [f"{title}:", *lines]
+def _omission_note(label: str) -> Callable[[int, int], str]:
+    """Build the line that discloses how many ``label`` items the budget dropped."""
+
+    def note(shown: int, total: int) -> str:
+        return (
+            f"({total - shown} more {label} omitted to fit the prompt budget; "
+            f"showing {shown} of {total}.)"
+        )
+
+    return note
+
+
+#: The human noun for each budget-fillable section, for the truncation message.
+_SECTION_LABELS = {"risks": "risks", "recent_events": "recent events"}
+
+
+def _truncation_message(material: BudgetedMaterial) -> str:
+    """Phrase which sections the prompt budget trimmed, for a note and a warning."""
+    parts = [
+        f"{fit.shown} of {fit.total} {_SECTION_LABELS.get(fit.key, fit.key)}"
+        for fit in material.fits
+        if fit.truncated
+    ]
+    shown = " and ".join(parts)
+    return (
+        f"The picture was too large for the prompt budget, so the model was shown only "
+        f"{shown}; the brief's risks, source events and references remain complete."
+    )
+
+
+def build_brief_material(
+    context: BriefContext, *, excluded_fields: Container[str] = frozenset()
+) -> BudgetedMaterial:
+    """Render a brief context into the material shown to the model, within budget.
+
+    The rendering is deterministic and bounded: the risks and the recent-events
+    view are filled into the prompt budget in that priority order, most urgent
+    first, dropping whole lines only rather than slicing the text, so an oversized
+    picture never reaches the model as a half-written record. A section that had to
+    drop lines says so in the material and in the returned fit, so the caller can
+    warn that the model saw only part of the picture. Event fields named in
+    ``excluded_fields`` are held back with a visible placeholder wherever they
+    appear: in the recent-events view, and, for ``subject``, in the risk titles
+    phrased from it. The risks, the notes and the source event IDs a reader acts on
+    are unchanged: only the model's view is bounded.
+    """
+    preamble = [
+        f"Operational picture as of {context.generated_at.isoformat()}.",
+        f"{context.event_count} events recorded.",
+    ]
+    sections = [
+        Section(
+            key="risks",
+            header="Risks (most urgent first):",
+            items=[_render_risk(r, excluded_fields) for r in context.risks],
+            none_line="Risks (most urgent first): none.",
+            omission_note=_omission_note("risks"),
+        ),
+        Section(
+            key="recent_events",
+            header="Recent events (newest first):",
+            items=[_render_event(e, excluded_fields) for e in context.recent_events],
+            none_line="Recent events (newest first): none.",
+            omission_note=_omission_note("recent events"),
+        ),
+    ]
+    trailer_blocks: list[list[str]] = []
+    if context.notes:
+        trailer_blocks.append(["Notes:", *[f"- {note}" for note in context.notes]])
+    return render_budgeted(preamble, sections, trailer_blocks)
 
 
 def render_context(context: BriefContext, *, excluded_fields: Container[str] = frozenset()) -> str:
     """Render a brief context as the plain-text material shown to the model.
 
-    The rendering is deterministic and bounded: the context is already bounded,
-    and the result is capped at :data:`MAX_PROMPT_LENGTH` so the request the
-    provider receives is always well-formed, whatever the context holds. Event
-    fields named in ``excluded_fields`` are held back with a visible placeholder
-    wherever they appear: in the recent-events view, and, for ``subject``, in the
-    risk titles phrased from it. The risks, the notes and the source event IDs a
-    reader acts on are unchanged.
+    This is :func:`build_brief_material` reduced to just its text, for callers that
+    only need the rendered material and not what the budget had to drop.
     """
-    lines: list[str] = [
-        f"Operational picture as of {context.generated_at.isoformat()}.",
-        f"{context.event_count} events recorded.",
-        "",
-        *_render_section(
-            "Risks (most urgent first)",
-            [_render_risk(r, excluded_fields) for r in context.risks],
-        ),
-        "",
-        *_render_section(
-            "Recent events (newest first)",
-            [_render_event(e, excluded_fields) for e in context.recent_events],
-        ),
-    ]
-    if context.notes:
-        lines += ["", *_render_section("Notes", [f"- {note}" for note in context.notes])]
-    rendered = "\n".join(lines)
-    if len(rendered) > MAX_PROMPT_LENGTH:
-        return rendered[:MAX_PROMPT_LENGTH].rstrip()
-    return rendered
+    return build_brief_material(context, excluded_fields=excluded_fields).text
 
 
 def generate_brief(
@@ -158,13 +199,20 @@ def generate_brief(
     traces to the exact prompt behind it and a consumer can detect a change in
     either.
     """
+    material = build_brief_material(context, excluded_fields=excluded_fields)
     request = CompletionRequest(
         instructions=instructions,
-        input=render_context(context, excluded_fields=excluded_fields),
+        input=material.text,
         max_output_tokens=max_output_tokens,
     )
     notes = list(context.notes)
     warnings = list(context.warnings)
+    if material.truncated:
+        # The deterministic picture below stays complete; only the model's view was
+        # trimmed to fit the prompt budget, so say which parts it did not see.
+        message = _truncation_message(material)
+        notes.append(message)
+        warnings.append(GenerationWarning(code=WarningCode.PROMPT_TRUNCATED, message=message))
     try:
         response = provider.complete(request)
     except AIProviderError:
