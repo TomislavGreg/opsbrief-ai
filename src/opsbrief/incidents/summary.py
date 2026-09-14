@@ -16,13 +16,12 @@ as missing here exactly as it is there.
 """
 
 import re
-from collections.abc import Container, Iterable, Sequence
+from collections.abc import Callable, Container, Iterable
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
-from opsbrief.ai.schema import MAX_PROMPT_LENGTH
 from opsbrief.events import Event
 from opsbrief.exclusion import (
     EXCLUSION_PLACEHOLDER,
@@ -37,6 +36,7 @@ from opsbrief.incidents.timeline import (
     TimelineEntry,
     build_incident_timeline,
 )
+from opsbrief.prompt_budget import BudgetedMaterial, Section, render_budgeted
 from opsbrief.references import SourceReference, build_source_references
 from opsbrief.warnings import Confidence, GenerationWarning, WarningCode, assess_confidence
 
@@ -57,7 +57,7 @@ INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/3"
 #: prose traces to the exact prompt behind it and a change in phrasing is visible
 #: rather than silent. Bump this whenever those instructions or that rendering
 #: change.
-INCIDENT_SUMMARY_PROMPT_VERSION = "incident-summary-prompt/2"
+INCIDENT_SUMMARY_PROMPT_VERSION = "incident-summary-prompt/3"
 
 
 class IncidentSummary(BaseModel):
@@ -221,11 +221,74 @@ def _render_entry(entry: TimelineEntry, excluded_fields: Container[str]) -> str:
     return f"- {occurred} [{severity}] {source} {event_type}: {subject} (status: {status})"
 
 
-def _render_section(title: str, lines: Sequence[str]) -> list[str]:
-    """Render a titled block, or a plain 'none' line when it is empty."""
-    if not lines:
-        return [f"{title}: none."]
-    return [f"{title}:", *lines]
+def _omission_note(label: str) -> Callable[[int, int], str]:
+    """Build the line that discloses how many ``label`` items the budget dropped."""
+
+    def note(shown: int, total: int) -> str:
+        return (
+            f"({total - shown} more {label} omitted to fit the prompt budget; "
+            f"showing {shown} of {total}.)"
+        )
+
+    return note
+
+
+def build_incident_material(
+    incident: Incident,
+    timeline: IncidentTimeline,
+    *,
+    excluded_fields: Container[str] = frozenset(),
+) -> BudgetedMaterial:
+    """Render an incident and its timeline into the material shown to the model.
+
+    The rendering is deterministic and bounded: the timeline is filled into the
+    prompt budget oldest first, dropping whole entries only rather than slicing the
+    text, so an incident with a very long history never reaches the model as a
+    half-written record. The incident's identity and span, and its resolution note
+    and any missing-event note, are kept whole and reserved before the timeline is
+    filled, so the state a reader must see survives even when the timeline is
+    trimmed; a trimmed timeline says so in the material and in the returned fit, so
+    the caller can warn that the model saw only part of it. The span is stated from
+    the timeline, so the model is shown the same start and end a reader would see.
+    Names in ``excluded_fields`` are held back with a visible placeholder wherever
+    they reach the model: an event field in the timeline lines; ``subject`` in the
+    incident title, which an incident declared from a risk is phrased from;
+    ``occurred_at`` in the span, which is derived from event occurrence; and the
+    free-form-text control in the title and the resolution note. The incident's
+    cited evidence, span and structured output are unchanged.
+    """
+    if "occurred_at" in excluded_fields:
+        span = EXCLUSION_PLACEHOLDER
+    elif timeline.started_at is not None and timeline.ended_at is not None:
+        span = f"{timeline.started_at.isoformat()} to {timeline.ended_at.isoformat()}"
+    else:
+        span = "no cited events resolved to a stored record"
+    preamble = [
+        f"Incident: {shown_incident_title(incident.title, excluded_fields)}",
+        f"Status: {incident.status.value}",
+        f"Severity: {incident.severity.value}",
+        f"Span: {span}",
+    ]
+    sections = [
+        Section(
+            key="timeline",
+            header="Timeline (oldest first):",
+            items=[_render_entry(entry, excluded_fields) for entry in timeline.entries],
+            none_line="Timeline (oldest first): none.",
+            omission_note=_omission_note("timeline events"),
+        )
+    ]
+    trailer_blocks: list[list[str]] = []
+    if incident.resolution_note is not None:
+        trailer_blocks.append(
+            [f"Resolution: {shown_free_text(incident.resolution_note, excluded_fields)}"]
+        )
+    if timeline.missing_event_ids:
+        missing = len(timeline.missing_event_ids)
+        trailer_blocks.append(
+            [f"Note: {missing} cited event(s) no longer resolve to a stored record."]
+        )
+    return render_budgeted(preamble, sections, trailer_blocks)
 
 
 def render_incident_material(
@@ -236,50 +299,10 @@ def render_incident_material(
 ) -> str:
     """Render an incident and its timeline as the material shown to the model.
 
-    The rendering is deterministic and bounded: the timeline is already bounded to
-    the incident's cited events, and the result is capped at
-    :data:`~opsbrief.ai.schema.MAX_PROMPT_LENGTH` so the request the provider
-    receives is always well-formed. The span is stated from the timeline, so the
-    model is shown the same start and end a reader would see, and missing cited
-    events are noted so the model is not misled into implying a complete picture.
-    A resolution note, when the incident carries one, is shown too, so the model
-    can phrase how the incident was put right. Names in ``excluded_fields`` are held
-    back with a visible placeholder wherever they reach the model: an event field
-    in the timeline lines; ``subject`` in the incident title, which an incident
-    declared from a risk is phrased from; ``occurred_at`` in the span, which is
-    derived from event occurrence; and the free-form-text control in the title and
-    the resolution note. The incident's cited evidence, span and structured output
-    are unchanged.
+    This is :func:`build_incident_material` reduced to just its text, for callers
+    that only need the rendered material and not what the budget had to drop.
     """
-    if "occurred_at" in excluded_fields:
-        span = EXCLUSION_PLACEHOLDER
-    elif timeline.started_at is not None and timeline.ended_at is not None:
-        span = f"{timeline.started_at.isoformat()} to {timeline.ended_at.isoformat()}"
-    else:
-        span = "no cited events resolved to a stored record"
-    lines: list[str] = [
-        f"Incident: {shown_incident_title(incident.title, excluded_fields)}",
-        f"Status: {incident.status.value}",
-        f"Severity: {incident.severity.value}",
-        f"Span: {span}",
-        "",
-        *_render_section(
-            "Timeline (oldest first)",
-            [_render_entry(entry, excluded_fields) for entry in timeline.entries],
-        ),
-    ]
-    if incident.resolution_note is not None:
-        lines += ["", f"Resolution: {shown_free_text(incident.resolution_note, excluded_fields)}"]
-    if timeline.missing_event_ids:
-        missing = len(timeline.missing_event_ids)
-        lines += [
-            "",
-            f"Note: {missing} cited event(s) no longer resolve to a stored record.",
-        ]
-    rendered = "\n".join(lines)
-    if len(rendered) > MAX_PROMPT_LENGTH:
-        return rendered[:MAX_PROMPT_LENGTH].rstrip()
-    return rendered
+    return build_incident_material(incident, timeline, excluded_fields=excluded_fields).text
 
 
 def generate_incident_summary(
@@ -322,13 +345,25 @@ def generate_incident_summary(
     events = list(events)
     timeline = build_incident_timeline(incident, events)
     references = build_source_references(incident.event_ids, events)
+    material = build_incident_material(incident, timeline, excluded_fields=excluded_fields)
     request = CompletionRequest(
         instructions=instructions,
-        input=render_incident_material(incident, timeline, excluded_fields=excluded_fields),
+        input=material.text,
         max_output_tokens=max_output_tokens,
     )
     notes: list[str] = []
     warnings: list[GenerationWarning] = []
+    if material.truncated:
+        # The cited evidence, span and references below stay complete; only the
+        # model's view of the timeline was trimmed to fit the prompt budget.
+        fit = material.fit("timeline")
+        message = (
+            f"The timeline was too large for the prompt budget, so the model was shown "
+            f"only {fit.shown} of {fit.total} timeline events; the incident's cited "
+            "events, span and references remain complete."
+        )
+        notes.append(message)
+        warnings.append(GenerationWarning(code=WarningCode.PROMPT_TRUNCATED, message=message))
     if timeline.missing_event_ids:
         message = (
             f"{len(timeline.missing_event_ids)} cited event(s) no longer resolve "
