@@ -12,6 +12,7 @@ from opsbrief.incidents import (
     IncidentSeverity,
     generate_incident_summary,
 )
+from opsbrief.warnings import Confidence, WarningCode
 
 NOW = datetime(2026, 8, 22, 18, 0, tzinfo=UTC)
 
@@ -106,3 +107,22 @@ def test_a_provider_outage_is_recorded_in_the_summary_audit() -> None:
     assert audit.model == provider.name
     assert audit.confidence is summary.confidence
     assert audit.warning_codes == [warning.code for warning in summary.warnings]
+
+
+def test_a_truncated_summary_audit_names_the_full_evidence_and_flags_the_omission() -> None:
+    # The prompt budget trimmed the timeline the provider saw, but the audit still
+    # names every cited event and flags, through the truncation warning, that not all
+    # of it reached the model.
+    ids = [f"e{i:04d}" for i in range(400)]
+    incident = make_incident(ids)
+    events = [make_event(ident, minutes_ago=400 - i) for i, ident in enumerate(ids)]
+    provider = FakeAIProvider(responses=["The webhook failed many times."])
+
+    summary = generate_incident_summary(incident, events, provider)
+    audit = audit_incident_summary(summary)
+
+    assert WarningCode.PROMPT_TRUNCATED in audit.warning_codes
+    assert audit.confidence is Confidence.MEDIUM
+    assert audit.source_event_ids == ids
+    assert audit.source_event_count == 400
+    assert len(provider.requests[0].input) <= 20_000

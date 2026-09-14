@@ -15,6 +15,7 @@ from opsbrief.brief.schema import BRIEF_OUTPUT_VERSION, BRIEF_PROMPT_VERSION
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk, RiskSeverity
+from opsbrief.warnings import Confidence, WarningCode
 
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
 
@@ -130,3 +131,35 @@ def test_a_provider_outage_is_recorded_in_the_brief_audit() -> None:
     assert audit.model == provider.name
     assert audit.confidence is brief.confidence
     assert audit.warning_codes == [warning.code for warning in brief.warnings]
+
+
+def test_a_truncated_brief_audit_names_the_full_evidence_and_flags_the_omission() -> None:
+    # The prompt budget trimmed what reached the provider, but the audit still names
+    # the full available evidence and flags, through the truncation warning, that not
+    # all of it was supplied to the model.
+    risks = [
+        Risk(
+            rule="overdue_work",
+            title=f"Overdue work item {i:04d} for the North Stand awaiting sign-off",
+            detail="Work was due earlier and is not resolved.",
+            severity=RiskSeverity.HIGH,
+            event_ids=[f"e{i:04d}"],
+        )
+        for i in range(400)
+    ]
+    context = make_context(
+        risks=risks,
+        references=[SourceReference.unresolved(f"e{i:04d}") for i in range(400)],
+    )
+    provider = FakeAIProvider(responses=["Lots is overdue."])
+
+    brief = generate_brief(context, provider)
+    audit = audit_daily_brief(brief)
+
+    assert WarningCode.PROMPT_TRUNCATED in audit.warning_codes
+    assert audit.confidence is Confidence.MEDIUM
+    # Available evidence: every cited event is named, so a consumer sees the whole
+    # picture even though the model was shown only part of it.
+    assert {f"e{i:04d}" for i in range(400)} <= set(audit.source_event_ids)
+    assert audit.source_event_count == len(audit.source_event_ids)
+    assert len(provider.requests[0].input) <= 20_000
