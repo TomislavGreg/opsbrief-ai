@@ -350,3 +350,56 @@ def test_a_provider_failure_records_the_provider_as_the_model() -> None:
     result = generate_incident_summary(make_incident(["e1"]), [make_event("e1")], FailingProvider())
 
     assert result.model == "failing"
+
+
+def make_many_events(count: int) -> list[Event]:
+    """Build ``count`` distinct stored events spread over time."""
+    return [make_event(f"e{i:04d}", minutes_ago=count - i) for i in range(count)]
+
+
+def test_oversized_timeline_is_trimmed_for_the_provider_but_the_summary_stays_complete() -> None:
+    ids = [f"e{i:04d}" for i in range(400)]
+    incident = make_incident(ids)
+    events = make_many_events(400)
+    provider = FakeAIProvider(responses=["A summary."])
+
+    result = generate_incident_summary(incident, events, provider)
+
+    material = provider.requests[0].input
+    assert len(material) <= 20_000
+    # The prompt ends on a whole omission note, not a half-written timeline entry.
+    assert "omitted to fit the prompt budget" in material
+    # The deterministic picture is untouched: every cited event is still carried.
+    assert result.source_event_ids == ids
+    assert result.started_at is not None and result.ended_at is not None
+
+
+def test_a_truncated_summary_warns_lowers_confidence_and_keeps_the_resolution_note() -> None:
+    ids = [f"e{i:04d}" for i in range(400)]
+    incident = make_incident(ids).transition_to(
+        IncidentStatus.RESOLVED,
+        at=NOW,
+        note="Restarted the ticketing sync and confirmed recovery.",
+    )
+    events = make_many_events(400)
+    provider = FakeAIProvider()  # echoes the material it was shown
+
+    result = generate_incident_summary(incident, events, provider)
+
+    codes = [warning.code for warning in result.warnings]
+    assert WarningCode.PROMPT_TRUNCATED in codes
+    truncation = next(w for w in result.warnings if w.code is WarningCode.PROMPT_TRUNCATED)
+    assert truncation.message in result.notes
+    assert result.confidence is Confidence.MEDIUM
+    # The resolution note is reserved before the timeline is filled, so it survives
+    # in both the model's material and the structured summary.
+    assert result.resolution_note == "Restarted the ticketing sync and confirmed recovery."
+    assert "Restarted the ticketing sync and confirmed recovery." in provider.requests[0].input
+
+
+def test_a_summary_within_budget_carries_no_truncation_warning() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+
+    result = generate_incident_summary(make_incident(["e1"]), [make_event("e1")], provider)
+
+    assert WarningCode.PROMPT_TRUNCATED not in [warning.code for warning in result.warnings]
