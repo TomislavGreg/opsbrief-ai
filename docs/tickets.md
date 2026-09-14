@@ -33,12 +33,13 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-095, AI-097 and AI-100; AI-100 was
-promoted from Backlog now that AI-099 is Done, AI-097 became eligible once AI-096
-was Done, and AI-095 once AI-094 was Done; AI-101 is Blocked on Docker
-verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
-workflow change. AI-092, AI-093, AI-094, AI-096, AI-098 and AI-099 are Done. Read
-the board, not this paragraph, for the current state.
+At the last update the Ready queue was AI-097, AI-100 and AI-111; AI-097 became
+eligible once AI-096 was Done, AI-100 once AI-099 was Done, and AI-111 was
+promoted from Backlog now that AI-095 is Done, its last outstanding dependency;
+AI-101 is Blocked on Docker verification; AI-124 is Blocked on a maintainer
+settings action and AI-056 on a workflow change. AI-092, AI-093, AI-094, AI-095,
+AI-096, AI-098 and AI-099 are Done. Read the board, not this paragraph, for the
+current state.
 
 A sensible progression:
 
@@ -215,6 +216,26 @@ Acceptance criteria:
 ### AI-095: Budget prompt sections and disclose omitted evidence
 
 Priority P2, Reliability bug, effort M, Routine. Depends on: AI-094. Finding F04.
+Status: Done. Resolved by `opsbrief.prompt_budget.render_budgeted`, which keeps a
+preamble and trailer whole and reserves room for them and for a worst-case
+omission note per section before filling prioritised sections with as many
+complete lines as fit, most important first, dropping whole records only rather
+than slicing the assembled string, and reporting each section's shown and total
+counts. Both renderers now build their material through it: the brief fills risks
+then the recent-events view, the incident summary fills the timeline oldest first,
+and the incident's identity, span and resolution note are reserved before the
+timeline, so the current state and the disclosures a reader must see always
+survive. A trimmed output carries a `prompt_truncated` warning (a new
+`WarningCode`, treated as a partial-picture gap so confidence is held to at most
+medium) and a matching note stating how much reached the model, while its risks,
+cited events, span and references stay complete, so an audit names the full
+available evidence apart from what the model saw. Material that already fits is
+rendered byte for byte as before; the brief and incident-summary prompt versions
+were bumped because the rendering changed. Covered by `tests/test_prompt_budget.py`
+(whole-record trimming, preamble and trailer survival, section priority, exact
+limit, multibyte Unicode, many short records) and truncation regressions in
+`tests/test_brief_generate.py`, `tests/test_incidents_summary_generate.py`,
+`tests/test_audit.py` and `tests/test_audit_incident.py`.
 
 Evidence: both renderers slice assembled material to 20,000 characters. With 120
 blocked events only 89 risk lines reached the brief provider, warned only about

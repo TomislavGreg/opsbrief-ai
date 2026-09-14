@@ -299,11 +299,23 @@ produced it.
 - Confidence and missing-data warnings on generated output: a daily brief and an
   incident summary carry the gaps in their picture as structured `warnings`, each
   pairing a machine-readable code (no events, no risks, events omitted, missing
-  events, no timeline, model unavailable, empty summary) with the same human
-  message the notes show, and a `confidence` level (`high`, `medium`, `low` or
-  `none`) derived from those warnings, so a reader can weigh the output at a glance
-  and a consumer can branch on a code instead of parsing prose. The warnings and
-  the confidence are deterministic and hold no model involvement.
+  events, no timeline, prompt truncated, model unavailable, empty summary) with the
+  same human message the notes show, and a `confidence` level (`high`, `medium`,
+  `low` or `none`) derived from those warnings, so a reader can weigh the output at
+  a glance and a consumer can branch on a code instead of parsing prose. The
+  warnings and the confidence are deterministic and hold no model involvement.
+- Prompt material budgeted so nothing is silently dropped: the material a model is
+  shown for a daily brief or an incident summary is fitted into the prompt budget by
+  dropping whole records only, most important first (the most urgent risks and
+  newest events for a brief, the earliest timeline entries for an incident), rather
+  than slicing the assembled text and leaving a half-written record. The header,
+  status, an incident's resolution note and the omission messages are reserved
+  before the variable sections are filled, so the current state and the disclosures
+  a reader must see always survive. When the budget trims the model's view the output
+  says so twice, a `prompt_truncated` warning and a matching note stating how much
+  was shown, and confidence drops to at most medium, while the deterministic picture
+  a reader acts on (every risk, cited event, span and reference) stays complete. A
+  brief or summary whose material already fits is rendered exactly as before.
 - Structured generation audit records: a daily brief or an incident summary can be
   projected into a compact `GenerationAudit` naming what the output was produced
   from (its source event ids, and any cited id that no longer resolved) and by (the
@@ -2555,7 +2567,7 @@ dashboard evidence links.
 | AI-092 | Evaluate current work state before raising blocked and overdue risks | Correctness and safety | Done |
 | AI-093 | Apply one evaluation instant and normalise iterable rule inputs | Correctness and safety | Done |
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
-| AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Ready |
+| AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Done |
 | AI-096 | Make incident mutations atomic | Correctness and safety | Done |
 | AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Ready |
 | AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Done |
@@ -2571,7 +2583,7 @@ dashboard evidence links.
 | AI-108 | Bound risk lists and dashboard and timeline previews without dropping analysis | Efficiency and reporting | Backlog |
 | AI-109 | Enforce event idempotency in SQLite | Efficiency and reporting | Backlog |
 | AI-110 | Persist and retrieve the audit of an exact generation | Efficiency and reporting | Backlog |
-| AI-111 | Separate evidence completeness from prose verification | Efficiency and reporting | Backlog |
+| AI-111 | Separate evidence completeness from prose verification | Efficiency and reporting | Ready |
 | AI-112 | Add one opt-in real AI provider with bounded execution | Efficiency and reporting | Backlog |
 | AI-113 | Add reporting periods, source freshness and changes since a prior brief | Efficiency and reporting | Backlog |
 | AI-114 | Include tracked incidents and recent resolutions in the daily brief | Efficiency and reporting | Backlog |
@@ -2601,8 +2613,9 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-095, AI-097 and AI-100; AI-100 was promoted now that AI-099 is Done, AI-097
-became eligible once AI-096 was Done, and AI-095 once AI-094 was Done.
+AI-097, AI-100 and AI-111; AI-097 became eligible once AI-096 was Done, AI-100
+once AI-099 was Done, and AI-111 was promoted now that AI-095 is Done, its last
+outstanding dependency.
 
 AI-092 was reopened after its first implementation and is now Done again. The
 first implementation grouped work by entity but read the single latest event as
@@ -2755,6 +2768,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-14 - Budgeted prompt sections and disclosed omitted evidence (AI-095): the brief and incident-summary renderers assembled the whole material then sliced it to 20,000 characters, so with a large picture the cut landed mid-record and dropped whatever came last, an incident's resolution note or a brief's omission notes, while the deterministic output still claimed high confidence over a picture the model never fully saw. Added `prompt_budget.render_budgeted`, which keeps a preamble and trailer whole and reserves room for them and for the omission messages, then fills prioritised sections with as many complete lines as fit, most important first, dropping whole records only and reporting how much each section had to drop. Routed both renderers through it: the brief fills risks then recent events, the incident summary fills the timeline oldest first, and the incident's identity, span and resolution note are reserved before the timeline. A trimmed output now carries a `prompt_truncated` warning and note stating how much was shown, with confidence held to at most medium, while its risks, cited events, span and references stay complete, so an audit names the full available evidence apart from what reached the model. Material that already fits is rendered exactly as before; both prompt versions were bumped. Added budgeting unit tests (whole-record trimming, preamble and trailer survival, exact limit, multibyte Unicode, many short records) and truncation regressions through both generation paths and their audits.
 - 2026-09-13 - Bounded incoming request bytes before parsing and handled malformed webhook bodies (AI-099): the webhook read the whole body into memory before checking its size, so a body sent without a `Content-Length` header was fully consumed before the bound applied, and the event, batch and incident write paths had no byte bound at all because Pydantic only limits a body after parsing; separately, a validly signed body that was not valid UTF-8 returned 500 because only invalid JSON was handled. Added `MaxBodySizeMiddleware`, a pure ASGI middleware wired ahead of the routers that refuses a body whose declared `Content-Length` exceeds the bound up front and counts a streamed body as it arrives, stopping at the bound plus at most the one crossing chunk and answering 413 before the body is parsed or stored, uniformly across the event, batch, incident and webhook paths. Removed the webhook's own after-the-fact size check in favour of it, and made the webhook decode the raw bytes explicitly after verifying the signature, mapping invalid UTF-8 and invalid JSON each to 422 so a signed malformed payload is a client error. Documented the byte bound as distinct from the event-count and field-character limits. Added middleware unit tests, write-path coverage and a signed invalid-UTF-8 regression.
 - 2026-09-12 - Read the reporting history from one stable SQLite snapshot (AI-098): the risk, brief, incident and dashboard services gathered the whole event history a page at a time, taking the store lock separately for each 500-row page, so an event inserted between two page reads shifted the newest-first order under the reader and the read returned a row twice while omitting the new event. Added `EventStore.list_all_events`, which returns the whole matching history in one ordered SELECT under a single hold of the lock, and read the history through it, so a whole-history read now sees one coherent snapshot with no gaps or repeats. Added `EventStore.list_page`, which reads a page and its total together under one lock hold, and assembled the `/events` listing through it so a request's total agrees with its page. Added boundary tests around the former page size and barrier-released concurrency tests over a shared store. The cross-request limitation of public offset paging is documented and left in place, since it is inherent to offset pagination.
 - 2026-09-10 - Made incident mutations atomic (AI-096): resolving, transitioning, linking and unlinking an incident read the record and wrote it back in two separate lock acquisitions, so two changes arriving at once for the same incident each read the same row and the later save silently dropped the earlier change while both callers saw success. Added `IncidentStore.mutate`, which reads, applies the change and writes it back under one held lock, and routed all four services through it, so concurrent mutations to one incident are serialised and none is lost; a rejected change still raises from the incident model and leaves the stored row untouched. Added store unit tests for the found, missing and rejected cases and barrier-released concurrency tests over a shared file-backed store, reopened to confirm the persisted outcome. The guarantee is scoped to the one shared store the service runs, which is documented.
@@ -2768,7 +2782,6 @@ it is not picked up and left half-finished.
 - 2026-09-06 - Replaced the deprecated Starlette status constants in the API: the webhook and incident-events routers used `HTTP_413_REQUEST_ENTITY_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_ENTITY`, which Starlette renamed to `HTTP_413_CONTENT_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_CONTENT` and now warns on. The routers use the current names, so the service's own code no longer emits a deprecation warning. The numeric codes (413, 422) are unchanged, so the responses are identical and the existing endpoint tests still pin them.
 - 2026-09-06 - Added severity and rule filtering to `GET /risks`: the endpoint now takes optional `severity` and `rule` query parameters, so a caller can poll just the critical risks, or only those from one rule, rather than fetching the whole snapshot and filtering client-side. The filters are threaded through a `RiskQuery` model and applied after the risks are ranked, so they never change detection or the order of what remains, and an omitted filter returns the whole picture as before. `generated_at` still records the instant the whole snapshot was judged against. The endpoint now validates its parameters, so an unknown severity or a stray parameter is a 422 rather than silently ignored. This completes the read-path filtering AI-083 and AI-084 began for the event and incident listings.
 - 2026-09-05 - Added a suggested-next-actions panel to the dashboard: `GET /dashboard` now renders the brief's suggested next actions inline below the active risks, one per active risk in the same priority order, so a duty manager sees not just what the risks are but what to do about them. Each action shows the risk's severity as a badge, the recommended step, the risk it addresses, the rule behind it and the source events it traces to, carried straight from the brief's deterministic actions so a suggestion traces to the same evidence as its risk and no model decides it. No active risks shows the same all-clear empty state the risks panel does, and every field is escaped as it is placed.
-- 2026-09-05 - Exposed the generation audit records over HTTP: `GET /brief/audit` audits the current daily brief and `GET /incidents/{incident_id}/audit` audits a tracked incident's summary, so the platform can log or persist the provenance of a generated output (what it was produced from and by, with the confidence and warning codes it reported) without carrying the full output. Each endpoint generates the brief or summary the same way `GET /brief` and `GET /incidents/{incident_id}/summary` do, then projects it into a compact `GenerationAudit`, so the record never disagrees with the output it describes. A provider outage degrades the audited output rather than failing the request, and a missing incident is a 404.
 
 ## Future Game Center Integration
 
