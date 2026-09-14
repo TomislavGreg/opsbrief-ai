@@ -292,3 +292,59 @@ def test_excluded_field_is_kept_out_of_the_provider_request() -> None:
     # the risk title phrased from it.
     assert "Safety inspection for North Stand is overdue" not in material
     assert "[excluded]" in material
+
+
+def make_many_risks(count: int) -> list[Risk]:
+    """Build ``count`` distinct risks, enough to overflow the prompt budget."""
+    return [
+        Risk(
+            rule="overdue_work",
+            title=f"Work item {i:04d} for the North Stand is overdue and unresolved",
+            detail="Work was due earlier and is not resolved.",
+            severity=RiskSeverity.HIGH,
+            event_ids=[f"e{i:04d}"],
+        )
+        for i in range(count)
+    ]
+
+
+def test_oversized_material_is_trimmed_for_the_provider_but_the_brief_stays_complete() -> None:
+    risks = make_many_risks(400)
+    context = make_context(risks=risks)
+    provider = FakeAIProvider(responses=["A summary."])
+
+    brief = generate_brief(context, provider)
+
+    # The model saw a bounded, whole-record prompt.
+    material = provider.requests[0].input
+    assert len(material) <= 20_000
+    # The prompt ends on the whole omission note, never a half-written risk line.
+    assert "omitted to fit the prompt budget" in material
+    assert material.rstrip().endswith(".)")
+    # The deterministic picture a reader acts on is untouched: every risk and every
+    # source event id is still carried on the brief.
+    assert brief.risks == risks
+    assert {f"e{i:04d}" for i in range(400)} <= set(brief.source_event_ids)
+
+
+def test_a_truncated_brief_warns_and_lowers_confidence() -> None:
+    context = make_context(risks=make_many_risks(400))
+    provider = FakeAIProvider(responses=["A summary."])
+
+    brief = generate_brief(context, provider)
+
+    codes = [warning.code for warning in brief.warnings]
+    assert WarningCode.PROMPT_TRUNCATED in codes
+    truncation = next(w for w in brief.warnings if w.code is WarningCode.PROMPT_TRUNCATED)
+    assert "risks" in truncation.message
+    assert truncation.message in brief.notes
+    # A trimmed model view is a partial-picture gap, not a missing-evidence one.
+    assert brief.confidence is Confidence.MEDIUM
+
+
+def test_a_brief_within_budget_carries_no_truncation_warning() -> None:
+    provider = FakeAIProvider(responses=["A summary."])
+
+    brief = generate_brief(make_context(), provider)
+
+    assert WarningCode.PROMPT_TRUNCATED not in [warning.code for warning in brief.warnings]
