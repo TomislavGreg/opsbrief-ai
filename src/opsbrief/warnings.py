@@ -40,6 +40,11 @@ class WarningCode(StrEnum):
     MISSING_EVENTS = "missing_events"
     #: No cited event resolved, so an incident summary has no timeline to describe.
     NO_TIMELINE = "no_timeline"
+    #: The material was too large for the prompt budget, so some of it (older risks
+    #: or events, later timeline entries) was not shown to the model. The
+    #: deterministic structured output stays complete; only the model's view was
+    #: trimmed.
+    PROMPT_TRUNCATED = "prompt_truncated"
     #: The provider was unavailable, so the output carries the deterministic
     #: picture with no model-phrased summary.
     MODEL_UNAVAILABLE = "model_unavailable"
@@ -92,6 +97,7 @@ _MISSING_EVIDENCE_CODES = frozenset({WarningCode.MISSING_EVENTS})
 _PARTIAL_CODES = frozenset(
     {
         WarningCode.EVENTS_OMITTED,
+        WarningCode.PROMPT_TRUNCATED,
         WarningCode.MODEL_UNAVAILABLE,
         WarningCode.EMPTY_SUMMARY,
     }
@@ -105,8 +111,9 @@ def assess_confidence(warnings: Iterable[GenerationWarning]) -> Confidence:
     with the warnings a reader sees. A code that leaves no source data at all
     (:data:`WarningCode.NO_EVENTS`, :data:`WarningCode.NO_TIMELINE`) yields
     ``NONE``; a gap in the cited evidence (:data:`WarningCode.MISSING_EVENTS`)
-    yields ``LOW``; a picture that stands but is bounded or unphrased yields
-    ``MEDIUM``; and a picture with no gap at all yields ``HIGH``. An informational
+    yields ``LOW``; a picture that stands but is bounded, trimmed to the prompt
+    budget or unphrased yields ``MEDIUM``; and a picture with no gap at all yields
+    ``HIGH``. An informational
     code such as :data:`WarningCode.NO_RISKS` does not lower confidence, so an
     all-clear brief stays ``HIGH``.
     """

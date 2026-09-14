@@ -53,10 +53,28 @@ def test_missing_cited_evidence_is_low_confidence() -> None:
 
 @pytest.mark.parametrize(
     "code",
-    [WarningCode.EVENTS_OMITTED, WarningCode.MODEL_UNAVAILABLE, WarningCode.EMPTY_SUMMARY],
+    [
+        WarningCode.EVENTS_OMITTED,
+        WarningCode.PROMPT_TRUNCATED,
+        WarningCode.MODEL_UNAVAILABLE,
+        WarningCode.EMPTY_SUMMARY,
+    ],
 )
 def test_a_partial_or_unphrased_picture_is_medium_confidence(code: WarningCode) -> None:
     assert assess_confidence([warning(code)]) is Confidence.MEDIUM
+
+
+def test_prompt_truncation_does_not_outrank_missing_evidence() -> None:
+    # Trimming the model's view to the prompt budget is a partial-picture gap: the
+    # deterministic evidence is still complete, so a real missing-evidence gap or a
+    # no-data gap alongside it still decides the level.
+    assert assess_confidence([warning(WarningCode.PROMPT_TRUNCATED)]) is Confidence.MEDIUM
+    assert (
+        assess_confidence(
+            [warning(WarningCode.PROMPT_TRUNCATED), warning(WarningCode.MISSING_EVENTS)]
+        )
+        is Confidence.LOW
+    )
 
 
 def test_the_most_severe_gap_decides_confidence() -> None:
