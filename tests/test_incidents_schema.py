@@ -1,6 +1,6 @@
 """Tests for the incident contract and its lifecycle transitions."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -306,6 +306,83 @@ def test_transition_returns_a_copy_and_leaves_the_original_untouched() -> None:
 
     assert incident.status is IncidentStatus.OPEN
     assert moved is not incident
+
+
+def test_resolved_at_cannot_be_after_updated_at() -> None:
+    with pytest.raises(ValidationError):
+        Incident(
+            id="inc-1",
+            title="x",
+            status=IncidentStatus.RESOLVED,
+            severity=IncidentSeverity.LOW,
+            opened_at=OPENED,
+            updated_at=OPENED + timedelta(hours=1),
+            resolved_at=OPENED + timedelta(hours=2),
+            event_ids=["e1"],
+        )
+
+
+def test_a_backdated_resolution_is_refused_before_storage() -> None:
+    # Resolving at an instant before the incident opened must not be accepted and
+    # then fail only when the stored record is read back.
+    with pytest.raises(ValueError):
+        make_incident().transition_to(IncidentStatus.RESOLVED, at=OPENED - timedelta(hours=1))
+
+
+def test_a_transition_cannot_move_the_update_time_backwards() -> None:
+    investigating = make_incident().transition_to(
+        IncidentStatus.INVESTIGATING, at=OPENED + timedelta(hours=2)
+    )
+
+    with pytest.raises(ValueError, match="backwards"):
+        investigating.transition_to(IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=1))
+
+
+def test_a_naive_transition_instant_is_refused() -> None:
+    with pytest.raises(ValueError, match="offset"):
+        make_incident().transition_to(
+            IncidentStatus.RESOLVED,
+            at=datetime(2026, 8, 12, 11, 0),  # noqa: DTZ001
+        )
+
+
+def test_an_aware_non_utc_transition_instant_normalises() -> None:
+    plus_two = timezone(timedelta(hours=2))
+    incident = make_incident().transition_to(
+        IncidentStatus.RESOLVED, at=datetime(2026, 8, 12, 12, 0, tzinfo=plus_two)
+    )
+
+    expected = datetime(2026, 8, 12, 10, 0, tzinfo=UTC)
+    assert incident.updated_at == expected
+    assert incident.resolved_at == expected
+
+
+def test_a_link_cannot_move_the_update_time_backwards() -> None:
+    investigating = make_incident().transition_to(
+        IncidentStatus.INVESTIGATING, at=OPENED + timedelta(hours=2)
+    )
+
+    with pytest.raises(ValueError, match="backwards"):
+        investigating.link_events(["e3"], at=OPENED + timedelta(hours=1))
+
+
+def test_a_naive_link_instant_is_refused() -> None:
+    with pytest.raises(ValueError, match="offset"):
+        make_incident().link_events(["e3"], at=datetime(2026, 8, 12, 11, 0))  # noqa: DTZ001
+
+
+def test_a_full_lifecycle_survives_a_validation_round_trip() -> None:
+    incident = (
+        make_incident()
+        .transition_to(IncidentStatus.INVESTIGATING, at=OPENED + timedelta(hours=1))
+        .link_events(["e3"], at=OPENED + timedelta(hours=2))
+        .transition_to(IncidentStatus.RESOLVED, at=OPENED + timedelta(hours=3), note="Fixed.")
+    )
+
+    fields = {name: getattr(incident, name) for name in Incident.model_fields}
+    restored = Incident.model_validate(fields)
+
+    assert restored == incident
 
 
 def test_linking_a_new_event_advances_the_update_time() -> None:
