@@ -185,6 +185,8 @@ class Incident(BaseModel):
             raise ValueError("updated_at cannot be before opened_at")
         if self.resolved_at is not None and self.resolved_at < self.opened_at:
             raise ValueError("resolved_at cannot be before opened_at")
+        if self.resolved_at is not None and self.updated_at < self.resolved_at:
+            raise ValueError("updated_at cannot be before resolved_at")
         return self
 
     @computed_field(  # type: ignore[prop-decorator]
@@ -231,6 +233,32 @@ class Incident(BaseModel):
             event_ids=event_ids,
         )
 
+    def _evolve(self, **changes: object) -> "Incident":
+        """Return a fully revalidated copy of the incident with ``changes`` applied.
+
+        Unlike :meth:`model_copy`, which writes the given fields without checking
+        them, this re-runs the model's validation, so a mutation that would break
+        an invariant (a naive or non-UTC instant, a resolution that precedes the
+        opening, timestamps out of order) is refused here rather than being stored
+        and only failing when the record is read back.
+        """
+        fields = {name: getattr(self, name) for name in type(self).model_fields}
+        fields.update(changes)
+        return type(self).model_validate(fields)
+
+    def _advanced_update_time(self, at: datetime | None) -> datetime:
+        """Return the instant to stamp a change with, refusing to move it back.
+
+        ``at`` defaults to the current time and is normalised to UTC, so a naive
+        instant is refused the same way an event's timestamp is and an aware
+        non-UTC one is converted. ``updated_at`` records the latest change, so a
+        mutation may not stamp one earlier than the incident's current update time.
+        """
+        moment = as_utc(at) if at is not None else datetime.now(UTC)
+        if moment < self.updated_at:
+            raise ValueError("updated_at cannot move backwards")
+        return moment
+
     def transition_to(
         self,
         target: IncidentStatus,
@@ -242,9 +270,12 @@ class Incident(BaseModel):
 
         The move must be one the lifecycle allows, or
         :class:`InvalidIncidentTransition` is raised and nothing changes.
-        ``updated_at`` advances to ``at``; ``resolved_at`` is set when the move
+        ``updated_at`` advances to ``at``, which is normalised to UTC and may not
+        predate the current update time; ``resolved_at`` is set when the move
         makes the incident inactive and cleared when it makes it active again, so
-        the resolution instant always matches the state.
+        the resolution instant always matches the state. The result is
+        revalidated before it is returned, so a mutation that would break an
+        invariant is refused here rather than only when it is read back.
 
         ``note`` records how the incident was put right. It is meaningful only for
         a move to an inactive state: a blank note is treated as none, a note given
@@ -255,7 +286,7 @@ class Incident(BaseModel):
         """
         if not can_transition(self.status, target):
             raise InvalidIncidentTransition(self.status, target)
-        moment = at or datetime.now(UTC)
+        moment = self._advanced_update_time(at)
         cleaned_note = note.strip() if note is not None else ""
         if len(cleaned_note) > MAX_RESOLUTION_NOTE_LENGTH:
             raise ValueError(
@@ -269,13 +300,11 @@ class Incident(BaseModel):
         else:
             resolved_at = self.resolved_at if self.resolved_at is not None else moment
             resolution_note = cleaned_note or self.resolution_note
-        return self.model_copy(
-            update={
-                "status": target,
-                "updated_at": moment,
-                "resolved_at": resolved_at,
-                "resolution_note": resolution_note,
-            }
+        return self._evolve(
+            status=target,
+            updated_at=moment,
+            resolved_at=resolved_at,
+            resolution_note=resolution_note,
         )
 
     def link_events(self, event_ids: list[str], *, at: datetime | None = None) -> "Incident":
@@ -300,8 +329,8 @@ class Incident(BaseModel):
                 merged.append(event_id)
         if merged == self.event_ids:
             return self
-        moment = at or datetime.now(UTC)
-        return self.model_copy(update={"event_ids": merged, "updated_at": moment})
+        moment = self._advanced_update_time(at)
+        return self._evolve(event_ids=merged, updated_at=moment)
 
     def unlink_events(self, event_ids: list[str], *, at: datetime | None = None) -> "Incident":
         """Return a copy of the incident with ``event_ids`` no longer attributed.
@@ -323,8 +352,8 @@ class Incident(BaseModel):
             return self
         if not remaining:
             raise ValueError("an incident must keep at least one source event")
-        moment = at or datetime.now(UTC)
-        return self.model_copy(update={"event_ids": remaining, "updated_at": moment})
+        moment = self._advanced_update_time(at)
+        return self._evolve(event_ids=remaining, updated_at=moment)
 
 
 class IncidentDeclaration(BaseModel):
