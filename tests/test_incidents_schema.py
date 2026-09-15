@@ -308,6 +308,38 @@ def test_transition_returns_a_copy_and_leaves_the_original_untouched() -> None:
     assert moved is not incident
 
 
+def test_linking_a_new_event_advances_the_update_time() -> None:
+    later = OPENED + timedelta(hours=1)
+    incident = make_incident().link_events(["e3"], at=later)
+
+    assert incident.event_ids == ["e1", "e2", "e3"]
+    assert incident.updated_at == later
+
+
+def test_linking_only_already_linked_ids_is_a_timestamp_free_no_op() -> None:
+    incident = make_incident()
+    unchanged = incident.link_events(["e1", "e2"], at=OPENED + timedelta(hours=3))
+
+    assert unchanged.event_ids == ["e1", "e2"]
+    assert unchanged.updated_at == OPENED
+
+
+def test_unlinking_an_event_advances_the_update_time() -> None:
+    later = OPENED + timedelta(hours=1)
+    incident = make_incident().unlink_events(["e2"], at=later)
+
+    assert incident.event_ids == ["e1"]
+    assert incident.updated_at == later
+
+
+def test_unlinking_an_absent_id_is_a_timestamp_free_no_op() -> None:
+    incident = make_incident()
+    unchanged = incident.unlink_events(["e9"], at=OPENED + timedelta(hours=3))
+
+    assert unchanged.event_ids == ["e1", "e2"]
+    assert unchanged.updated_at == OPENED
+
+
 def test_an_incident_is_serialisable() -> None:
     dumped = make_incident().model_dump()
 

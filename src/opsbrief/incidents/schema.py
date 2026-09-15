@@ -284,7 +284,10 @@ class Incident(BaseModel):
         New identifiers are appended after the ones already linked, in the order
         given; an identifier already linked is left where it is, so linking is
         idempotent and never reorders or duplicates the evidence. ``updated_at``
-        advances to ``at``. A closed incident is frozen, so linking to one raises
+        advances to ``at`` when the evidence actually changes; a link that adds
+        nothing (every id already cited) is a no-op that returns the incident
+        unchanged, so an idempotent retry does not invent a new modification time.
+        A closed incident is frozen, so linking to one raises
         :class:`IncidentClosedError` and nothing changes.
         """
         if self.is_terminal:
@@ -295,6 +298,8 @@ class Incident(BaseModel):
                 raise ValueError("event_ids must not contain a blank identifier")
             if event_id not in merged:
                 merged.append(event_id)
+        if merged == self.event_ids:
+            return self
         moment = at or datetime.now(UTC)
         return self.model_copy(update={"event_ids": merged, "updated_at": moment})
 
@@ -305,12 +310,17 @@ class Incident(BaseModel):
         An incident must always cite at least one source event, so an unlink that
         would remove the last of them raises ``ValueError`` and nothing changes;
         a closed incident is frozen, so unlinking from one raises
-        :class:`IncidentClosedError`. ``updated_at`` advances to ``at``.
+        :class:`IncidentClosedError`. ``updated_at`` advances to ``at`` when the
+        evidence actually changes; an unlink that removes nothing (no cited id
+        matched) is a no-op that returns the incident unchanged, so an idempotent
+        retry does not invent a new modification time.
         """
         if self.is_terminal:
             raise IncidentClosedError(self.id, "unlink events from")
         removing = set(event_ids)
         remaining = [event_id for event_id in self.event_ids if event_id not in removing]
+        if remaining == self.event_ids:
+            return self
         if not remaining:
             raise ValueError("an incident must keep at least one source event")
         moment = at or datetime.now(UTC)
