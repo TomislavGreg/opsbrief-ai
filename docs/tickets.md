@@ -33,13 +33,13 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-097, AI-100 and AI-111; AI-097 became
-eligible once AI-096 was Done, AI-100 once AI-099 was Done, and AI-111 was
-promoted from Backlog now that AI-095 is Done, its last outstanding dependency;
-AI-101 is Blocked on Docker verification; AI-124 is Blocked on a maintainer
-settings action and AI-056 on a workflow change. AI-092, AI-093, AI-094, AI-095,
-AI-096, AI-098 and AI-099 are Done. Read the board, not this paragraph, for the
-current state.
+At the last update the Ready queue was AI-102, AI-104, AI-105, AI-100 and AI-111;
+AI-102, AI-104 and AI-105 are P1 bugs with no outstanding dependencies, promoted
+from Backlog now that the earlier P1 correctness work is Done, and are taken ahead
+of the P2 AI-100 (eligible once AI-099 was Done) and AI-111; AI-101 is Blocked on
+Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
+on a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098 and
+AI-099 are Done. Read the board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -292,6 +292,21 @@ Acceptance criteria:
 ### AI-097: Revalidate incident state and timestamps before persistence
 
 Priority P2, Bug, effort S, Routine. Depends on: AI-096. Finding F06.
+Status: Done. Resolved by routing `Incident.transition_to`, `link_events` and
+`unlink_events` through a private `_evolve` that rebuilds the record with
+`model_validate` instead of `model_copy(update=...)`, so the field validators and
+the lifecycle model validator run on every mutation and an invalid change is
+refused before storage rather than only failing on read-back. A shared
+`_advanced_update_time` normalises each supplied instant to UTC (refusing a naive
+one, converting an aware non-UTC one) and refuses an update time earlier than the
+incident's current one, and the model gained the `updated_at >= resolved_at`
+invariant so the timestamps stay ordered `opened_at <= resolved_at <= updated_at`.
+A link that adds nothing already cited, or an unlink of an id the incident never
+cited, now returns the record unchanged, so an idempotent retry is a true no-op
+that does not invent a fresh modification time. Covered by unit tests in
+`tests/test_incidents_schema.py` (the ordering invariant, the backdated, naive and
+non-UTC cases, the no-op timestamp policy for link and unlink, and a full-lifecycle
+validation round-trip).
 
 Evidence: resolving an incident with an explicit instant before it opened is
 accepted and committed, then fails Pydantic validation on read-back. Mutation

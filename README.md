@@ -269,6 +269,16 @@ produced it.
   rejected change (a forbidden lifecycle move, a link to a closed incident) leaves
   the stored record exactly as it was. The guarantee holds within the single shared
   store the service runs.
+- Revalidated incident mutations: resolving, transitioning, linking and unlinking
+  an incident produce a fully revalidated record rather than an unchecked field
+  copy, so a change that would break an invariant is refused before it is stored
+  instead of only failing when the record is read back. Each supplied instant is
+  normalised to UTC (a naive one is refused, an aware non-UTC one converted), an
+  update time cannot move backwards, and the timestamps stay ordered
+  (`opened_at <= resolved_at <= updated_at`), so a backdated resolution is rejected
+  up front. A link that adds nothing already cited, or an unlink of an id the
+  incident never cited, is a true no-op that returns the record unchanged and does
+  not invent a fresh modification time.
 - Sensitive-metadata redaction: a metadata value whose key names a sensitive
   term (a credential, an email, a phone number) is masked with a visible
   `[redacted]` marker before the event is stored, so it never reaches the
@@ -2569,15 +2579,15 @@ dashboard evidence links.
 | AI-094 | Enforce AI exclusions across all prompt material | Correctness and safety | Done |
 | AI-095 | Budget prompt sections and disclose omitted evidence | Correctness and safety | Done |
 | AI-096 | Make incident mutations atomic | Correctness and safety | Done |
-| AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Ready |
+| AI-097 | Revalidate incident state and timestamps before persistence | Correctness and safety | Done |
 | AI-098 | Read reporting history from a stable SQLite snapshot | Correctness and safety | Done |
 | AI-099 | Bound incoming bytes before parsing and handle malformed webhook bodies | Correctness and safety | Done |
 | AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Ready |
 | AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Blocked |
-| AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Backlog |
+| AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Ready |
 | AI-103 | Validate configuration at startup and make readiness truthful | Correctness and safety | Backlog |
-| AI-104 | Align input validation with stored and generated output contracts | Correctness and safety | Backlog |
-| AI-105 | Make timestamps and database paths round-trip reliably | Correctness and safety | Backlog |
+| AI-104 | Align input validation with stored and generated output contracts | Correctness and safety | Ready |
+| AI-105 | Make timestamps and database paths round-trip reliably | Correctness and safety | Ready |
 | AI-106 | Reuse one reporting context per dashboard request | Efficiency and reporting | Backlog |
 | AI-107 | Fetch incident evidence by id instead of scanning every event | Efficiency and reporting | Backlog |
 | AI-108 | Bound risk lists and dashboard and timeline previews without dropping analysis | Efficiency and reporting | Backlog |
@@ -2613,9 +2623,9 @@ A run selects the highest-priority eligible Ready ticket whose dependencies are 
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
 unavailable tool never stalls unrelated eligible work. The current Ready queue is
-AI-097, AI-100 and AI-111; AI-097 became eligible once AI-096 was Done, AI-100
-once AI-099 was Done, and AI-111 was promoted now that AI-095 is Done, its last
-outstanding dependency.
+AI-102, AI-104, AI-105, AI-100 and AI-111; the three P1 bugs (AI-102, AI-104 and
+AI-105) carry no outstanding dependencies and are taken first, ahead of the P2
+AI-100 (eligible once AI-099 was Done) and AI-111. AI-097 is now Done.
 
 AI-092 was reopened after its first implementation and is now Done again. The
 first implementation grouped work by entity but read the single latest event as
@@ -2768,6 +2778,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-15 - Revalidated incident state and timestamps before persistence (AI-097): resolving, transitioning, linking and unlinking an incident applied the change with `model_copy(update=...)`, which does not revalidate, so a backdated or naive instant, or one that let `updated_at` regress or `resolved_at` overtake it, was accepted and committed and only failed Pydantic validation when the record was read back. Routed every mutation through a revalidating copy that re-runs the model's checks, normalised each supplied instant to UTC (a naive one refused, an aware non-UTC one converted), refused an update time that moves backwards, and added the `resolved_at <= updated_at` invariant, so an invalid change is rejected before storage and every accepted transition, link and unlink can be stored and read back as a valid incident. A link that adds nothing already cited, or an unlink of an id the incident never cited, is now a true no-op that leaves the modification time untouched. Added schema unit tests for the ordering invariant, the backdated, naive and non-UTC cases, the no-op timestamp policy and a full-lifecycle validation round-trip.
 - 2026-09-14 - Budgeted prompt sections and disclosed omitted evidence (AI-095): the brief and incident-summary renderers assembled the whole material then sliced it to 20,000 characters, so with a large picture the cut landed mid-record and dropped whatever came last, an incident's resolution note or a brief's omission notes, while the deterministic output still claimed high confidence over a picture the model never fully saw. Added `prompt_budget.render_budgeted`, which keeps a preamble and trailer whole and reserves room for them and for the omission messages, then fills prioritised sections with as many complete lines as fit, most important first, dropping whole records only and reporting how much each section had to drop. Routed both renderers through it: the brief fills risks then recent events, the incident summary fills the timeline oldest first, and the incident's identity, span and resolution note are reserved before the timeline. A trimmed output now carries a `prompt_truncated` warning and note stating how much was shown, with confidence held to at most medium, while its risks, cited events, span and references stay complete, so an audit names the full available evidence apart from what reached the model. Material that already fits is rendered exactly as before; both prompt versions were bumped. Added budgeting unit tests (whole-record trimming, preamble and trailer survival, exact limit, multibyte Unicode, many short records) and truncation regressions through both generation paths and their audits.
 - 2026-09-13 - Bounded incoming request bytes before parsing and handled malformed webhook bodies (AI-099): the webhook read the whole body into memory before checking its size, so a body sent without a `Content-Length` header was fully consumed before the bound applied, and the event, batch and incident write paths had no byte bound at all because Pydantic only limits a body after parsing; separately, a validly signed body that was not valid UTF-8 returned 500 because only invalid JSON was handled. Added `MaxBodySizeMiddleware`, a pure ASGI middleware wired ahead of the routers that refuses a body whose declared `Content-Length` exceeds the bound up front and counts a streamed body as it arrives, stopping at the bound plus at most the one crossing chunk and answering 413 before the body is parsed or stored, uniformly across the event, batch, incident and webhook paths. Removed the webhook's own after-the-fact size check in favour of it, and made the webhook decode the raw bytes explicitly after verifying the signature, mapping invalid UTF-8 and invalid JSON each to 422 so a signed malformed payload is a client error. Documented the byte bound as distinct from the event-count and field-character limits. Added middleware unit tests, write-path coverage and a signed invalid-UTF-8 regression.
 - 2026-09-12 - Read the reporting history from one stable SQLite snapshot (AI-098): the risk, brief, incident and dashboard services gathered the whole event history a page at a time, taking the store lock separately for each 500-row page, so an event inserted between two page reads shifted the newest-first order under the reader and the read returned a row twice while omitting the new event. Added `EventStore.list_all_events`, which returns the whole matching history in one ordered SELECT under a single hold of the lock, and read the history through it, so a whole-history read now sees one coherent snapshot with no gaps or repeats. Added `EventStore.list_page`, which reads a page and its total together under one lock hold, and assembled the `/events` listing through it so a request's total agrees with its page. Added boundary tests around the former page size and barrier-released concurrency tests over a shared store. The cross-request limitation of public offset paging is documented and left in place, since it is inherent to offset pagination.
@@ -2781,7 +2792,6 @@ it is not picked up and left half-finished.
 - 2026-09-07 - Added entity filtering to `GET /events`: the listing now takes optional `entity_type` and `entity_id` filters alongside the existing source, type, severity, status and occurrence-window ones, so the platform can fetch every event recorded against one fixture, task or integration rather than paging the whole history and filtering client-side. An entity identifier is only meaningful within its kind, so `entity_id` must be given together with `entity_type` (an `entity_id` on its own is a 422), while `entity_type` alone returns every event about that kind of entity. The filters are exact-match column conditions threaded through the store's `list_events` and `count` so a filtered listing and its total stay in step.
 - 2026-09-06 - Replaced the deprecated Starlette status constants in the API: the webhook and incident-events routers used `HTTP_413_REQUEST_ENTITY_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_ENTITY`, which Starlette renamed to `HTTP_413_CONTENT_TOO_LARGE` and `HTTP_422_UNPROCESSABLE_CONTENT` and now warns on. The routers use the current names, so the service's own code no longer emits a deprecation warning. The numeric codes (413, 422) are unchanged, so the responses are identical and the existing endpoint tests still pin them.
 - 2026-09-06 - Added severity and rule filtering to `GET /risks`: the endpoint now takes optional `severity` and `rule` query parameters, so a caller can poll just the critical risks, or only those from one rule, rather than fetching the whole snapshot and filtering client-side. The filters are threaded through a `RiskQuery` model and applied after the risks are ranked, so they never change detection or the order of what remains, and an omitted filter returns the whole picture as before. `generated_at` still records the instant the whole snapshot was judged against. The endpoint now validates its parameters, so an unknown severity or a stray parameter is a 422 rather than silently ignored. This completes the read-path filtering AI-083 and AI-084 began for the event and incident listings.
-- 2026-09-05 - Added a suggested-next-actions panel to the dashboard: `GET /dashboard` now renders the brief's suggested next actions inline below the active risks, one per active risk in the same priority order, so a duty manager sees not just what the risks are but what to do about them. Each action shows the risk's severity as a badge, the recommended step, the risk it addresses, the rule behind it and the source events it traces to, carried straight from the brief's deterministic actions so a suggestion traces to the same evidence as its risk and no model decides it. No active risks shows the same all-clear empty state the risks panel does, and every field is escaped as it is placed.
 
 ## Future Game Center Integration
 
