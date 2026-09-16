@@ -33,13 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-102, AI-104, AI-105, AI-100 and AI-111;
-AI-102, AI-104 and AI-105 are P1 bugs with no outstanding dependencies, promoted
-from Backlog now that the earlier P1 correctness work is Done, and are taken ahead
-of the P2 AI-100 (eligible once AI-099 was Done) and AI-111; AI-101 is Blocked on
-Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
-on a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098 and
-AI-099 are Done. Read the board, not this paragraph, for the current state.
+At the last update the Ready queue was AI-104, AI-105, AI-100 and AI-111; AI-104 and
+AI-105 are P1 bugs with no outstanding dependencies and are taken ahead of the P2
+AI-100 (eligible once AI-099 was Done) and AI-111; AI-101 is Blocked on Docker
+verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
+workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099 and
+AI-102 are Done. Read the board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -477,6 +476,21 @@ Acceptance criteria:
   writes; it does not imply HMAC protects other routes.
 - Private-data deployments have a clear read-access boundary. No account database
   or broad authentication product is required.
+
+Resolution (Done): added `OPSBRIEF_READ_ONLY` and a `ReadOnlyMiddleware` that, when
+read-only mode is on, refuses every unsafe-method request (`POST`, `PUT`, `PATCH`,
+`DELETE`) with a consistent 403 ahead of routing, so event and batch ingestion,
+incident declaration and all its mutations, and the webhook are closed at once while
+`GET` reads keep working. Demo-data mode enables read-only mode by default, so a
+public demo is populated (startup seeding runs in-process, unaffected) yet takes no
+writes over HTTP. Changed `compose.yaml` to publish on the loopback interface only
+(`127.0.0.1:8000:8000`), so external exposure is a deliberate change. Documented, in
+`docs/deployment.md`, network exposure, read-only mode, and an nginx ingress example
+that exposes the signed webhook while `limit_except GET HEAD { deny all; }` blocks
+the other write routes at the proxy, noting the webhook HMAC authenticates only its
+own route and that read access is restricted at the boundary, not by an account
+database. Tests cover the middleware in isolation, per-route write refusal across the
+mutation surface, and demo-mode read-but-not-write.
 
 ### AI-103: Validate configuration at startup and make readiness truthful
 

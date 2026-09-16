@@ -104,6 +104,8 @@ should be set deliberately for a real deployment.
 | `OPSBRIEF_LOG_LEVEL` | `info` | Log level label. |
 | `OPSBRIEF_DATABASE_URL` | `sqlite:///./opsbrief.db` | The SQLite database. Only `sqlite:///` URLs are accepted. Point this at a path on durable storage (see [Persistence](#persistence)). |
 | `OPSBRIEF_AI_PROVIDER` | `fake` | The AI provider. Only `fake` is implemented; an unknown name is refused at startup. |
+| `OPSBRIEF_READ_ONLY` | `false` | When true, every write route (event and batch ingestion, incident declaration and mutation, and the webhook) is refused with 403 while reads keep working. Demo-data mode turns this on by default. See [Read-only mode](#read-only-mode). |
+| `OPSBRIEF_DEMO_DATA` | `false` | When true, seed a fresh (empty) store with synthetic match-day data on startup and serve read-only (see `OPSBRIEF_READ_ONLY`). Leave false for a real deployment. |
 | `OPSBRIEF_REDACT_METADATA_KEYS` | empty | Extra metadata key terms whose values are masked before storage, comma-separated. Adds to the built-in set. |
 | `OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS` | empty | Event fields held back from the material a model is shown, comma-separated. Chosen from `source`, `event_type`, `subject`, `severity`, `status`, `occurred_at`. |
 | `OPSBRIEF_WEBHOOK_SECRET` | empty | Shared secret for HMAC verification of `POST /webhooks/events`. Unset disables the webhook (404); when set it must be at least 16 characters. |
@@ -216,6 +218,73 @@ readiness probe at `/health/ready`. The database is opened when the application
 starts, so in the common single-file deployment a serving process is usually ready
 too; the readiness probe still earns its place when the database lives on a mounted
 volume that can become unavailable while the process keeps running.
+
+## Network exposure
+
+The service binds to the port uvicorn is told to listen on and does nothing to
+restrict who can reach it: any authorization is the deployment's to add at the proxy
+or the network boundary. The bundled `compose.yaml` therefore publishes the port on
+the loopback interface only (`127.0.0.1:8000:8000`), so a fresh `docker compose up`
+is reachable from the host but not from the network. Exposing the service more
+widely is a deliberate change: publish on `0.0.0.0` (or put the container on a
+network the proxy can reach) only once a reverse proxy in front of it terminates TLS
+and enforces whatever access policy the deployment needs.
+
+## Read-only mode
+
+Set `OPSBRIEF_READ_ONLY=true` to serve every read endpoint while refusing every
+write. In this mode an unsafe-method request (`POST`, `PUT`, `PATCH`, `DELETE`) is
+answered with 403 before it reaches a router, so event and batch ingestion, incident
+declaration and mutation, and the webhook are all closed at once, with a consistent
+response, while `GET` reads (the brief, risks, events, incidents, the dashboard,
+health) work unchanged. Demo-data mode turns this on by default, so a public demo
+seeded at startup serves its dashboard without accepting writes over HTTP; startup
+seeding runs in-process and is unaffected.
+
+Read-only mode is all-or-nothing over writes. It is the right switch for a demo or a
+read-only replica, not for a deployment that must accept the signed webhook while
+keeping the other write routes off the public network. For that, filter by path at
+the proxy (below).
+
+## Ingress: exposing the signed webhook while blocking internal writes
+
+A deployment that takes events over the webhook but does not want the other write
+routes reachable from the public network exposes exactly one write path and blocks
+the rest at the proxy. The webhook's HMAC authenticates that one route; it does not
+protect `POST /events`, `POST /incidents` or the other mutations, which carry no
+signature. So the proxy, not the application, is what keeps them off the public
+network. An example nginx server block that allows the read endpoints and the signed
+webhook and refuses every other write:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name opsbrief.example.com;
+
+    # ... ssl_certificate / ssl_certificate_key ...
+
+    # The one authenticated write path the platform posts to.
+    location = /webhooks/events {
+        proxy_pass http://127.0.0.1:8000;
+    }
+
+    # Read endpoints. GET/HEAD are reads; refuse anything else that slips through.
+    location / {
+        limit_except GET HEAD {
+            deny all;
+        }
+        proxy_pass http://127.0.0.1:8000;
+    }
+}
+```
+
+`limit_except GET HEAD { deny all; }` returns 403 for a `POST` or `DELETE` to any
+path other than the webhook, so `POST /events`, `POST /incidents` and the incident
+mutations are unreachable from outside while the webhook and every read still work.
+This keeps unauthenticated writes off the public network without the service needing
+an account database or a broad authentication product. Restrict who may read (briefs
+and events are unauthenticated by design) with an additional `location`-level control
+if a deployment holds data it does not want read openly.
 
 ## Running behind a reverse proxy
 
