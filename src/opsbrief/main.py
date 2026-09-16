@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from opsbrief import __version__
 from opsbrief.api import brief, dashboard, events, health, incidents, risks, webhooks
 from opsbrief.api.limits import MaxBodySizeMiddleware
+from opsbrief.api.readonly import ReadOnlyMiddleware
 from opsbrief.config import get_settings
 from opsbrief.samples.seed import seed_demo_data
 from opsbrief.storage import EventStore, IncidentStore
@@ -54,6 +55,10 @@ def create_app() -> FastAPI:
     # Bound the bytes of every request body before a router parses it, so a payload
     # is size-limited on all write paths rather than only after Pydantic parsing.
     app.add_middleware(MaxBodySizeMiddleware)
+    # In read-only mode refuse every write route up front, so a public demo or a
+    # read-only deployment serves reads without taking writes over HTTP. Added last
+    # so it wraps outermost and rejects a write before the body is streamed.
+    app.add_middleware(ReadOnlyMiddleware, read_only=settings.is_read_only())
     app.include_router(health.router)
     app.include_router(events.router)
     app.include_router(risks.router)

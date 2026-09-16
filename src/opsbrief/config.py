@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./opsbrief.db"
     ai_provider: str = "fake"
     demo_data: bool = False
+    read_only: bool = False
     redact_metadata_keys: str = ""
     ai_context_excluded_fields: str = ""
     webhook_secret: str = ""
@@ -52,6 +53,16 @@ class Settings(BaseSettings):
         if self.webhook_timestamp_tolerance_seconds <= 0:
             raise ValueError("OPSBRIEF_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS must be positive")
         return self
+
+    def is_read_only(self) -> bool:
+        """Return whether the service should refuse every write route.
+
+        Read-only mode is on when ``OPSBRIEF_READ_ONLY`` is set, and also whenever
+        demo-data mode is on: a public demo seeds its own data at startup and should
+        take no writes over HTTP, so it is read-only by default. Startup seeding runs
+        in-process and is unaffected; only the HTTP write routes are closed.
+        """
+        return self.read_only or self.demo_data
 
     def webhook_enabled(self) -> bool:
         """Return whether the webhook front door is configured and enabled.
