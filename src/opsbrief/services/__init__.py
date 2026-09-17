@@ -7,6 +7,7 @@ from opsbrief.services.audit_reporting import (
 from opsbrief.services.brief_reporting import report_daily_brief
 from opsbrief.services.dashboard import build_dashboard_view
 from opsbrief.services.incident_reporting import (
+    UnknownEventIdsError,
     declare_incident,
     get_incident,
     link_incident_events,
@@ -14,6 +15,7 @@ from opsbrief.services.incident_reporting import (
     resolve_incident,
     transition_incident,
     unlink_incident_event,
+    verify_events_exist,
 )
 from opsbrief.services.incident_summary_reporting import report_incident_summary
 from opsbrief.services.incident_timeline_reporting import report_incident_timeline
@@ -24,6 +26,7 @@ from opsbrief.services.risk_reporting import list_risks
 
 __all__ = [
     "Readiness",
+    "UnknownEventIdsError",
     "build_dashboard_view",
     "check_readiness",
     "declare_incident",
@@ -43,4 +46,5 @@ __all__ = [
     "resolve_incident",
     "transition_incident",
     "unlink_incident_event",
+    "verify_events_exist",
 ]

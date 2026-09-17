@@ -31,6 +31,7 @@ from opsbrief.incidents import (
     InvalidIncidentTransition,
 )
 from opsbrief.services import (
+    UnknownEventIdsError,
     declare_incident,
     get_incident,
     link_incident_events,
@@ -41,6 +42,7 @@ from opsbrief.services import (
     resolve_incident,
     transition_incident,
     unlink_incident_event,
+    verify_events_exist,
 )
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -220,13 +222,26 @@ def read_incident_audit(
     summary="Declare a tracked incident",
     response_description="The stored incident, with its service-assigned identifier.",
 )
-def create_incident(declaration: IncidentDeclaration, store: IncidentStoreDependency) -> Incident:
+def create_incident(
+    declaration: IncidentDeclaration,
+    store: IncidentStoreDependency,
+    event_store: EventStoreDependency,
+) -> Incident:
     """Declare an incident from the request body and store it.
 
     A body that does not satisfy the declaration contract is rejected with 422
-    and nothing is stored. The incident is opened now with a fresh identifier and
-    returned with 201, so a caller can track it and read it back by that id.
+    and nothing is stored, as is one citing an event id no stored event answers to,
+    so an incident's evidence always traces to events the service holds. The
+    incident is opened now with a fresh identifier and returned with 201, so a
+    caller can track it and read it back by that id.
     """
+    try:
+        verify_events_exist(event_store, declaration.event_ids)
+    except UnknownEventIdsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
     return declare_incident(store, declaration, datetime.now(UTC))
 
 
@@ -337,6 +352,7 @@ def link_tracked_incident_events(
     ],
     link: IncidentEventLink,
     store: IncidentStoreDependency,
+    event_store: EventStoreDependency,
 ) -> Incident:
     """Attribute the events in the request body to the incident with ``incident_id``.
 
@@ -344,11 +360,13 @@ def link_tracked_incident_events(
     saved, so the platform can grow an incident's evidence as the picture develops.
     Linking is idempotent: an id already cited is left where it is, so the evidence
     is never reordered or duplicated. A body that does not satisfy the contract is
-    rejected with 422. An identifier that matches no stored incident is answered
-    with 404. A closed incident is a finished record, so linking to one is answered
-    with 409, so a caller can tell a missing incident from a frozen one.
+    rejected with 422, as is one citing an event id no stored event answers to, so
+    the evidence stays traceable. An identifier that matches no stored incident is
+    answered with 404. A closed incident is a finished record, so linking to one is
+    answered with 409, so a caller can tell a missing incident from a frozen one.
     """
     try:
+        verify_events_exist(event_store, link.event_ids)
         incident = link_incident_events(store, incident_id, link, datetime.now(UTC))
     except IncidentClosedError as error:
         raise HTTPException(

@@ -5,12 +5,32 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 
+def seed_events(client: TestClient, count: int = 2) -> list[str]:
+    """Store ``count`` real events and return their service-assigned ids in order."""
+    ids: list[str] = []
+    for index in range(count):
+        response = client.post(
+            "/events",
+            json={
+                "source": "integrations",
+                "event_type": "integration.failed",
+                "subject": f"Ticketing webhook failed {index}",
+                "occurred_at": "2026-07-29T09:30:00Z",
+                "severity": "high",
+                "status": "failed",
+            },
+        )
+        assert response.status_code == 201
+        ids.append(response.json()["id"])
+    return ids
+
+
 def declare(client: TestClient, **overrides: Any) -> dict[str, Any]:
-    """Declare an incident and return the stored body."""
+    """Declare an incident over freshly seeded real events and return the stored body."""
     payload: dict[str, Any] = {
         "title": "Ticketing integration failing repeatedly",
         "severity": "high",
-        "event_ids": ["e17", "e18"],
+        "event_ids": seed_events(client, 2),
     }
     payload.update(overrides)
     response = client.post("/incidents", json=payload)

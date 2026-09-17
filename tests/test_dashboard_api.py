@@ -211,17 +211,17 @@ def test_dashboard_shows_a_tracked_incident_and_its_timeline(client: TestClient)
 
 
 def test_dashboard_incident_reports_missing_cited_events(client: TestClient) -> None:
-    # An incident may cite an id no stored event answers to; the panel names it as
-    # a gap rather than dropping it.
-    declared = client.post(
-        "/incidents",
-        json={
-            "title": "Incident over a vanished event",
-            "severity": "medium",
-            "event_ids": ["not-a-stored-id"],
-        },
+    # A stored incident may cite an id no stored event answers to; the panel names
+    # it as a gap rather than dropping it. Declaring through the API now rejects an
+    # unknown id, so the record is stored directly to exercise the read-time path.
+    from opsbrief.incidents import Incident, IncidentSeverity
+
+    incident = Incident.declare(
+        title="Incident over a vanished event",
+        severity=IncidentSeverity.MEDIUM,
+        event_ids=["not-a-stored-id"],
     )
-    assert declared.status_code == 201
+    client.app.state.incident_store.add(incident)
 
     body = client.get("/dashboard").text
 

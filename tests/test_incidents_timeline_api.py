@@ -5,6 +5,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from opsbrief.incidents import Incident, IncidentSeverity
+
 NOW = datetime.now(UTC).replace(microsecond=0)
 
 
@@ -40,6 +42,22 @@ def declare_incident(client: TestClient, event_ids: list[str], **overrides: Any)
     response = client.post("/incidents", json=payload)
     assert response.status_code == 201
     return response.json()["id"]
+
+
+def store_incident_directly(client: TestClient, event_ids: list[str]) -> str:
+    """Persist an incident straight to the store, bypassing the declaration endpoint.
+
+    Declaring through the API now rejects an unknown event id, so a record whose
+    evidence no longer resolves (an event purged out of band, or a record from
+    before that check existed) is created at the store level to exercise the
+    read-time compatibility path.
+    """
+    store = client.app.state.incident_store
+    incident = Incident.declare(
+        title="Legacy incident", severity=IncidentSeverity.HIGH, event_ids=event_ids
+    )
+    store.add(incident)
+    return incident.id
 
 
 def test_an_unknown_incident_is_a_404(client: TestClient) -> None:
@@ -78,7 +96,7 @@ def test_timeline_lays_cited_events_out_oldest_first(client: TestClient) -> None
 
 def test_a_cited_event_with_no_stored_record_is_reported_missing(client: TestClient) -> None:
     event_id = post_event(client)
-    incident_id = declare_incident(client, [event_id, "gone"])
+    incident_id = store_incident_directly(client, [event_id, "gone"])
 
     body = client.get(f"/incidents/{incident_id}/timeline").json()
 
@@ -87,7 +105,7 @@ def test_a_cited_event_with_no_stored_record_is_reported_missing(client: TestCli
 
 
 def test_an_incident_whose_events_are_all_missing_has_an_empty_span(client: TestClient) -> None:
-    incident_id = declare_incident(client, ["gone"])
+    incident_id = store_incident_directly(client, ["gone"])
 
     body = client.get(f"/incidents/{incident_id}/timeline").json()
 
