@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse
 from opsbrief.api.dependencies import get_ai_provider, get_excluded_ai_context_fields
+from opsbrief.incidents import Incident, IncidentSeverity
 
 
 def submission(**overrides: Any) -> dict[str, Any]:
@@ -69,10 +70,26 @@ def test_summary_carries_the_incident_and_traces_to_its_events(client: TestClien
     assert body["output_version"]
 
 
+def store_incident_directly(client: TestClient, event_ids: list[str]) -> str:
+    """Persist an incident straight to the store, bypassing the declaration endpoint.
+
+    Declaring through the API now rejects an unknown event id, so a record whose
+    evidence no longer resolves (an event purged out of band, or a record from
+    before that check existed) is created at the store level to exercise the
+    read-time compatibility path.
+    """
+    store = client.app.state.incident_store
+    incident = Incident.declare(
+        title="Legacy incident", severity=IncidentSeverity.HIGH, event_ids=event_ids
+    )
+    store.add(incident)
+    return incident.id
+
+
 def test_a_cited_event_with_no_stored_record_is_reported_missing(client: TestClient) -> None:
-    # An incident may cite an event the store never held; the summary names the gap
-    # rather than failing the request.
-    incident_id = declare_incident(client, ["gone"])
+    # A stored incident may cite an event the store no longer holds; the summary
+    # names the gap rather than failing the request.
+    incident_id = store_incident_directly(client, ["gone"])
 
     body = client.get(f"/incidents/{incident_id}/summary").json()
 

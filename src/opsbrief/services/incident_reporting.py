@@ -7,6 +7,7 @@ lifecycle and the declaration rules live in the incident package, not here, so
 this module only wires a validated request to the store.
 """
 
+from collections.abc import Iterable
 from datetime import datetime
 
 from opsbrief.events import as_utc
@@ -20,7 +21,38 @@ from opsbrief.incidents import (
     IncidentStatus,
     IncidentTransition,
 )
-from opsbrief.storage import IncidentStore
+from opsbrief.storage import EventStore, IncidentStore
+
+
+class UnknownEventIdsError(ValueError):
+    """Raised when a declaration or link cites ids no stored event answers to.
+
+    New evidence must point at events the service actually holds, so a declaration
+    or link naming an unknown id is refused rather than stored as evidence that can
+    never resolve. It is a ``ValueError`` carrying the offending ids so the caller
+    can report exactly which ones were not found. Reading a stored incident keeps
+    its deliberate support for a cited event the store no longer holds; this guard
+    runs only when new evidence is supplied.
+    """
+
+    def __init__(self, event_ids: Iterable[str]) -> None:
+        self.event_ids = list(event_ids)
+        joined = ", ".join(repr(event_id) for event_id in self.event_ids)
+        super().__init__(f"no stored event answers to id(s): {joined}")
+
+
+def verify_events_exist(event_store: EventStore, event_ids: Iterable[str]) -> None:
+    """Refuse ``event_ids`` that no stored event answers to.
+
+    Evidence supplied on a declaration or a link must trace to events the service
+    holds, so an id absent from the event store is reported through
+    :class:`UnknownEventIdsError` and the caller turns it into a 4xx before any
+    mutation. Ids are looked up individually for now; AI-107 replaces the per-id
+    lookup with a single batched fetch.
+    """
+    unknown = [event_id for event_id in event_ids if event_store.get(event_id) is None]
+    if unknown:
+        raise UnknownEventIdsError(unknown)
 
 
 def declare_incident(

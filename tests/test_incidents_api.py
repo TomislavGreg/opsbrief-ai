@@ -5,8 +5,33 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 
+def seed_events(client: TestClient, count: int = 2) -> list[str]:
+    """Store ``count`` real events and return their service-assigned ids in order."""
+    ids: list[str] = []
+    for index in range(count):
+        response = client.post(
+            "/events",
+            json={
+                "source": "integrations",
+                "event_type": "integration.failed",
+                "subject": f"Ticketing webhook failed {index}",
+                "occurred_at": "2026-07-29T09:30:00Z",
+                "severity": "high",
+                "status": "failed",
+            },
+        )
+        assert response.status_code == 201
+        ids.append(response.json()["id"])
+    return ids
+
+
 def declaration(**overrides: Any) -> dict[str, Any]:
-    """Return a valid incident declaration body, with ``overrides`` applied."""
+    """Return a declaration body with placeholder events, for validation tests.
+
+    The placeholder ids do not exist in the store, so this body is only for tests
+    whose request is rejected before the events are checked. Tests that need a
+    stored incident go through :func:`declare`, which cites real events.
+    """
     payload: dict[str, Any] = {
         "title": "Ticketing integration failing repeatedly",
         "severity": "high",
@@ -17,22 +42,33 @@ def declaration(**overrides: Any) -> dict[str, Any]:
 
 
 def declare(client: TestClient, **overrides: Any) -> dict[str, Any]:
-    """Declare an incident and return the stored body."""
-    response = client.post("/incidents", json=declaration(**overrides))
+    """Declare an incident over freshly seeded real events and return the stored body."""
+    body = declaration(**overrides)
+    if "event_ids" not in overrides:
+        body["event_ids"] = seed_events(client, 2)
+    response = client.post("/incidents", json=body)
     assert response.status_code == 201
     return response.json()
 
 
 def test_declaring_stores_an_open_incident(client: TestClient) -> None:
-    response = client.post("/incidents", json=declaration())
+    event_ids = seed_events(client, 2)
+    response = client.post("/incidents", json=declaration(event_ids=event_ids))
 
     assert response.status_code == 201
     body = response.json()
     assert body["id"]
     assert body["status"] == "open"
     assert body["severity"] == "high"
-    assert body["event_ids"] == ["e17", "e18"]
+    assert body["event_ids"] == event_ids
     assert body["resolved_at"] is None
+
+
+def test_a_declaration_citing_an_unknown_event_is_rejected(client: TestClient) -> None:
+    response = client.post("/incidents", json=declaration(event_ids=["not-a-stored-event"]))
+
+    assert response.status_code == 422
+    assert "not-a-stored-event" in response.json()["detail"]
 
 
 def test_a_declared_incident_can_be_read_back(client: TestClient) -> None:
