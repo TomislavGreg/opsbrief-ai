@@ -37,6 +37,24 @@ def test_accepted_event_is_given_an_identity(client: TestClient) -> None:
     assert body["received_at"]
 
 
+def test_an_event_dated_in_an_early_year_reads_back(client: TestClient) -> None:
+    # A year below 1000 once serialised with an unpadded year the reader could not
+    # parse, so a later list or brief read failed with 500. It now round-trips.
+    created = client.post("/events", json=submission(occurred_at="0001-01-01T00:00:00Z"))
+    assert created.status_code == 201
+    event_id = created.json()["id"]
+
+    fetched = client.get(f"/events/{event_id}")
+    listed = client.get("/events")
+    brief = client.get("/brief")
+
+    assert fetched.status_code == 200
+    assert fetched.json()["occurred_at"] == "0001-01-01T00:00:00Z"
+    assert listed.status_code == 200
+    assert any(event["id"] == event_id for event in listed.json()["events"])
+    assert brief.status_code == 200
+
+
 def test_optional_fields_default_when_omitted(client: TestClient) -> None:
     body = client.post("/events", json=submission()).json()
 
