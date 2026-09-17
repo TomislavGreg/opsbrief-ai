@@ -507,6 +507,35 @@ def test_opening_creates_a_missing_directory(tmp_path: Path) -> None:
     assert (tmp_path / "data" / "opsbrief.db").exists()
 
 
+def test_a_tilde_path_expands_to_home_not_a_literal_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The parent directory was expanded but the unexpanded path was handed to
+    # SQLite, so the database was created under a literal "~" instead of home.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    with EventStore.open("sqlite:///~/data/opsbrief.db") as store:
+        store.add(make_event())
+
+    assert (home / "data" / "opsbrief.db").exists()
+    assert not (tmp_path / "~").exists()
+
+
+def test_a_relative_path_is_created_under_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    with EventStore.open("sqlite:///data/opsbrief.db") as store:
+        store.add(make_event())
+
+    assert (tmp_path / "data" / "opsbrief.db").exists()
+
+
 def test_database_path_reads_a_sqlite_url() -> None:
     assert database_path("sqlite:///./opsbrief.db") == "./opsbrief.db"
     assert database_path("sqlite:////var/lib/opsbrief.db") == "/var/lib/opsbrief.db"

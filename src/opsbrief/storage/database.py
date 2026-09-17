@@ -74,12 +74,18 @@ def database_path(database_url: str) -> str:
 def connect(database_url: str) -> sqlite3.Connection:
     """Open a connection to the database named by ``database_url``.
 
-    The parent directory of a file database is created when missing so that a
-    fresh checkout runs without a setup step.
+    A leading ``~`` is expanded once, and the expanded path is used both to
+    create the parent directory and to open the database, so the file is never
+    created at a different location than the directory prepared for it. A
+    relative path stays relative to the current working directory, and an
+    absolute path is used as given. The parent directory of a file database is
+    created when missing so that a fresh checkout runs without a setup step.
     """
     path = database_path(database_url)
     if path != IN_MEMORY_PATH:
-        Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+        expanded = Path(path).expanduser()
+        expanded.parent.mkdir(parents=True, exist_ok=True)
+        path = str(expanded)
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
