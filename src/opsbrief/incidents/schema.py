@@ -38,18 +38,31 @@ MAX_INCIDENT_PAGE_SIZE = 500
 #: length-limited like the rest of the contract.
 MAX_RESOLUTION_NOTE_LENGTH = 2_000
 
+#: Upper bound, in characters, on a single cited event identifier. It matches the
+#: stored ``Event.id`` and the ``SourceReference.event_id`` limits so a cited id
+#: that passes here always resolves into a reference rather than failing when a
+#: summary or timeline is built.
+MAX_EVENT_ID_LENGTH = 64
+
+#: Upper bound on how many source events one incident may cite, so an incident's
+#: evidence stays bounded rather than growing without limit.
+MAX_EVIDENCE_EVENT_IDS = 500
+
 
 def _check_distinct_nonblank_ids(value: list[str]) -> list[str]:
-    """Reject blank or repeated identifiers so the evidence stays traceable.
+    """Reject blank, repeated or oversized identifiers so the evidence stays traceable.
 
-    A blank id points at nothing, and a repeated id overstates the evidence, so
-    both are refused rather than silently kept. Shared by the incident model and
-    the declaration request body so both apply the same rule.
+    A blank id points at nothing, a repeated id overstates the evidence, and an id
+    longer than a stored event's identifier can never resolve into a reference, so
+    all three are refused rather than silently kept. Shared by the incident model
+    and the declaration and link request bodies so they all apply the same rule.
     """
     seen: set[str] = set()
     for event_id in value:
         if not event_id.strip():
             raise ValueError("event_ids must not contain a blank identifier")
+        if len(event_id) > MAX_EVENT_ID_LENGTH:
+            raise ValueError(f"event id {event_id!r} exceeds {MAX_EVENT_ID_LENGTH} characters")
         if event_id in seen:
             raise ValueError(f"event_ids must be unique; {event_id!r} appears more than once")
         seen.add(event_id)
@@ -98,7 +111,7 @@ class Incident(BaseModel):
     active and cleared if it reopens.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: str = Field(
         min_length=1,
@@ -133,6 +146,7 @@ class Incident(BaseModel):
     )
     event_ids: list[str] = Field(
         min_length=1,
+        max_length=MAX_EVIDENCE_EVENT_IDS,
         description="Source event IDs behind the incident, in link order, distinct and non-blank.",
     )
 
@@ -329,6 +343,8 @@ class Incident(BaseModel):
                 merged.append(event_id)
         if merged == self.event_ids:
             return self
+        if len(merged) > MAX_EVIDENCE_EVENT_IDS:
+            raise ValueError(f"an incident may cite at most {MAX_EVIDENCE_EVENT_IDS} source events")
         moment = self._advanced_update_time(at)
         return self._evolve(event_ids=merged, updated_at=moment)
 
@@ -366,7 +382,7 @@ class IncidentDeclaration(BaseModel):
     so a mistyped body fails loudly rather than being silently dropped.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str = Field(
         min_length=1,
@@ -378,6 +394,7 @@ class IncidentDeclaration(BaseModel):
     )
     event_ids: list[str] = Field(
         min_length=1,
+        max_length=MAX_EVIDENCE_EVENT_IDS,
         description="Source event IDs behind the incident, in link order, distinct and non-blank.",
     )
 
@@ -461,6 +478,7 @@ class IncidentEventLink(BaseModel):
 
     event_ids: list[str] = Field(
         min_length=1,
+        max_length=MAX_EVIDENCE_EVENT_IDS,
         description="Source event IDs to link, in order, distinct and non-blank.",
     )
 

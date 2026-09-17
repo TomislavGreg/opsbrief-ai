@@ -6,6 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from opsbrief.incidents import (
+    MAX_EVENT_ID_LENGTH,
+    MAX_EVIDENCE_EVENT_IDS,
     Incident,
     IncidentSeverity,
     IncidentStatus,
@@ -70,6 +72,42 @@ def test_event_ids_must_be_unique() -> None:
 def test_event_ids_reject_a_blank_identifier() -> None:
     with pytest.raises(ValidationError):
         make_incident(event_ids=["e1", "  "])
+
+
+def test_event_ids_reject_an_oversized_identifier() -> None:
+    with pytest.raises(ValidationError, match="exceeds"):
+        make_incident(event_ids=["e1", "x" * (MAX_EVENT_ID_LENGTH + 1)])
+
+
+def test_event_ids_accept_an_identifier_at_the_length_limit() -> None:
+    incident = make_incident(event_ids=["e1", "x" * MAX_EVENT_ID_LENGTH])
+
+    assert incident.event_ids == ["e1", "x" * MAX_EVENT_ID_LENGTH]
+
+
+def test_event_ids_reject_more_than_the_evidence_cap() -> None:
+    too_many = [f"e{index}" for index in range(MAX_EVIDENCE_EVENT_IDS + 1)]
+
+    with pytest.raises(ValidationError):
+        make_incident(event_ids=too_many)
+
+
+def test_blank_title_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        make_incident(title="   ")
+
+
+def test_title_whitespace_is_stripped() -> None:
+    incident = make_incident(title="  Ticketing failing  ")
+
+    assert incident.title == "Ticketing failing"
+
+
+def test_linking_beyond_the_evidence_cap_is_rejected() -> None:
+    incident = make_incident(event_ids=[f"e{index}" for index in range(MAX_EVIDENCE_EVENT_IDS)])
+
+    with pytest.raises(ValueError, match="at most"):
+        incident.link_events(["overflow"], at=OPENED + timedelta(minutes=1))
 
 
 def test_unknown_fields_are_rejected() -> None:

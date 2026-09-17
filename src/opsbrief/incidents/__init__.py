@@ -17,6 +17,8 @@ from opsbrief.incidents.lifecycle import (
 from opsbrief.incidents.linking import IncidentEvents, resolve_incident_events
 from opsbrief.incidents.schema import (
     DEFAULT_INCIDENT_PAGE_SIZE,
+    MAX_EVENT_ID_LENGTH,
+    MAX_EVIDENCE_EVENT_IDS,
     MAX_INCIDENT_PAGE_SIZE,
     MAX_RESOLUTION_NOTE_LENGTH,
     Incident,
@@ -50,6 +52,8 @@ __all__ = [
     "INACTIVE_STATUSES",
     "INCIDENT_SUMMARY_OUTPUT_VERSION",
     "INCIDENT_SUMMARY_PROMPT_VERSION",
+    "MAX_EVENT_ID_LENGTH",
+    "MAX_EVIDENCE_EVENT_IDS",
     "MAX_INCIDENT_PAGE_SIZE",
     "MAX_INCIDENT_SUMMARY_LENGTH",
     "MAX_RESOLUTION_NOTE_LENGTH",
