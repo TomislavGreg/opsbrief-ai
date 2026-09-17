@@ -149,8 +149,12 @@ docker run --rm -p 8000:8000 \
 
 Note the four slashes: `sqlite:////data/opsbrief.db` is an absolute path
 (`/data/opsbrief.db`), while `sqlite:///./opsbrief.db` is relative to the working
-directory. The mounted directory must be writable by the image's `opsbrief` user
-(uid 1000).
+directory. A leading `~` (as in `sqlite:///~/opsbrief.db`) expands to the home
+directory of the user the process runs as, and its parent directory is created
+there, so the file is never left under a literal `~` in the working directory.
+`sqlite:///:memory:` keeps the database in memory for the life of the process,
+which is useful for a throwaway run but persists nothing. The mounted directory
+must be writable by the image's `opsbrief` user (uid 1000).
 
 The equivalent in Compose is a named volume:
 
