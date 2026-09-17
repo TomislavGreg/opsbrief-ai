@@ -33,12 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-104, AI-105, AI-100 and AI-111; AI-104 and
-AI-105 are P1 bugs with no outstanding dependencies and are taken ahead of the P2
-AI-100 (eligible once AI-099 was Done) and AI-111; AI-101 is Blocked on Docker
-verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
-workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099 and
-AI-102 are Done. Read the board, not this paragraph, for the current state.
+At the last update the Ready queue was AI-105, AI-100 and AI-111; AI-105 is a P1 bug
+with no outstanding dependencies and is taken ahead of the P2 AI-100 (eligible once
+AI-099 was Done) and AI-111; AI-101 is Blocked on Docker verification; AI-124 is
+Blocked on a maintainer settings action and AI-056 on a workflow change. AI-092,
+AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099, AI-102 and AI-104 are Done.
+Read the board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -541,6 +541,22 @@ Acceptance criteria:
 - Unknown ids in new declarations or links are rejected consistently; old
   missing-evidence records still render a documented warning instead of 500, and
   tests cover the policy change and compatibility.
+
+Resolution (Done): added a minimum length to the optional `entity_type`,
+`entity_id` and `external_id` fields so a whitespace-only value is refused rather
+than normalised to an empty string, and a finite-number check on metadata so NaN
+and infinity (which JSON serialises to null) are rejected across direct, batch and
+webhook ingestion. Incident titles are stripped and a blank one refused like an
+event subject. Each cited event id is capped at the 64-character `Event` and
+`SourceReference` limit, and the evidence list is bounded by
+`MAX_EVIDENCE_EVENT_IDS` on the model and the declaration and link bodies, enforced
+on cumulative links too (an over-cap link is a 422, not a 500). A new
+`verify_events_exist` service guard, run at the declaration and link endpoints,
+refuses an id the event store does not hold with 422 and no mutation, while reading
+a stored incident keeps its deliberate support for a cited event the store no
+longer holds, so a timeline, summary and dashboard panel still name the gap. Added
+schema and service unit tests and updated the incident API tests to declare over
+real events and to store a missing-evidence record directly for the read-time path.
 
 ### AI-105: Make timestamps and database paths round-trip reliably
 
