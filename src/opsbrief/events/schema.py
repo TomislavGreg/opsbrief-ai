@@ -9,6 +9,7 @@ and ``metadata``, not in bespoke fields, so a new producer never requires a
 schema change.
 """
 
+import math
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated
@@ -109,11 +110,13 @@ class EventInput(BaseModel):
     )
     entity_type: str | None = Field(
         default=None,
+        min_length=1,
         max_length=64,
         description="Kind of thing the event is about, for example 'fixture'.",
     )
     entity_id: str | None = Field(
         default=None,
+        min_length=1,
         max_length=128,
         description="Identifier of that thing in the producing system.",
     )
@@ -123,6 +126,7 @@ class EventInput(BaseModel):
     )
     external_id: str | None = Field(
         default=None,
+        min_length=1,
         max_length=128,
         description="Producer's own identifier, used to recognise resubmissions.",
     )
@@ -152,6 +156,11 @@ class EventInput(BaseModel):
                 raise ValueError(
                     f"metadata value for {key!r} exceeds {MAX_METADATA_VALUE_LENGTH} characters"
                 )
+            # A bool is an int subclass but never a float, so only real floats reach
+            # this branch. NaN and +/-infinity have no JSON representation and would
+            # serialise to null, silently losing the value, so they are refused here.
+            if isinstance(item, float) and not math.isfinite(item):
+                raise ValueError(f"metadata value for {key!r} must be a finite number")
         return value
 
     @model_validator(mode="after")

@@ -154,14 +154,6 @@ def test_add_or_get_never_deduplicates_without_an_external_id(store: EventStore)
     assert store.count() == 2
 
 
-def test_add_or_get_treats_a_blank_external_id_as_no_key(store: EventStore) -> None:
-    first = store.add_or_get(make_event(external_id=""))
-    second = store.add_or_get(make_event(external_id=""))
-
-    assert first.id != second.id
-    assert store.count() == 2
-
-
 def test_add_or_get_still_rejects_a_repeated_id(store: EventStore) -> None:
     event = make_event()
     store.add(event)

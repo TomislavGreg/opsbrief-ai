@@ -133,6 +133,21 @@ def test_due_at_may_precede_occurred_at() -> None:
     assert event.due_at < event.occurred_at
 
 
+def test_whitespace_only_entity_type_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        EventInput(**make_payload(entity_type="   ", entity_id="4821"))
+
+
+def test_whitespace_only_entity_id_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        EventInput(**make_payload(entity_type="fixture", entity_id="   "))
+
+
+def test_whitespace_only_external_id_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        EventInput(**make_payload(external_id="   "))
+
+
 def test_entity_type_without_entity_id_is_rejected() -> None:
     with pytest.raises(ValidationError, match="together"):
         EventInput(**make_payload(entity_type="fixture"))
@@ -160,6 +175,19 @@ def test_oversized_metadata_value_is_rejected() -> None:
 
     with pytest.raises(ValidationError, match="exceeds"):
         EventInput(**make_payload(metadata=oversized))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_metadata_value_is_rejected(value: float) -> None:
+    with pytest.raises(ValidationError, match="finite"):
+        EventInput(**make_payload(metadata={"fill_rate": value}))
+
+
+def test_non_finite_metadata_value_is_rejected_from_json() -> None:
+    payload = '{"source": "rostering", "event_type": "shift.unfilled", "subject": "x", '
+    payload += '"occurred_at": "2026-07-29T09:30:00Z", "metadata": {"fill_rate": Infinity}}'
+    with pytest.raises(ValidationError, match="finite"):
+        EventInput.model_validate_json(payload)
 
 
 def test_metadata_accepts_scalar_values_including_none() -> None:
