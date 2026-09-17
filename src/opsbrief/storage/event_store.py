@@ -47,13 +47,39 @@ class DuplicateEventIdError(Exception):
 
 
 def format_timestamp(value: datetime) -> str:
-    """Return ``value`` as the fixed-width UTC text stored in the database."""
-    return value.astimezone(UTC).strftime(TIMESTAMP_FORMAT)
+    """Return ``value`` as the fixed-width UTC text stored in the database.
+
+    The year is always four digits, so the representation is fixed-width across
+    the whole supported range (years 1 through 9999) and sorts in string order.
+    ``strftime`` is avoided for the year because its ``%Y`` does not zero-pad a
+    year below 1000 on every platform, which produced a value the parser could
+    not read back.
+    """
+    aware = value.astimezone(UTC)
+    return (
+        f"{aware.year:04d}-{aware.month:02d}-{aware.day:02d}"
+        f"T{aware.hour:02d}:{aware.minute:02d}:{aware.second:02d}"
+        f".{aware.microsecond:06d}Z"
+    )
 
 
 def parse_timestamp(value: str) -> datetime:
-    """Return the UTC datetime held in a stored timestamp."""
-    return datetime.strptime(value, TIMESTAMP_FORMAT).replace(tzinfo=UTC)
+    """Return the UTC datetime held in a stored timestamp.
+
+    A database written before the year was zero-padded may hold a timestamp whose
+    year has fewer than four digits (the ``strftime`` quirk above). The year is
+    left-padded and the parse retried, so such a row reads back as the year it
+    plainly names rather than failing. The padding is exact, not a guess: the
+    digits before the first separator are the year.
+    """
+    try:
+        return datetime.strptime(value, TIMESTAMP_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        year, sep, rest = value.partition("-")
+        if not sep or not year.isdigit():
+            raise
+        padded = f"{int(year):04d}{sep}{rest}"
+        return datetime.strptime(padded, TIMESTAMP_FORMAT).replace(tzinfo=UTC)
 
 
 def _to_row(event: Event) -> dict[str, object]:
