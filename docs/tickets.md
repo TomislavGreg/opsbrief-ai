@@ -33,12 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-105, AI-100 and AI-111; AI-105 is a P1 bug
-with no outstanding dependencies and is taken ahead of the P2 AI-100 (eligible once
-AI-099 was Done) and AI-111; AI-101 is Blocked on Docker verification; AI-124 is
-Blocked on a maintainer settings action and AI-056 on a workflow change. AI-092,
-AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099, AI-102 and AI-104 are Done.
-Read the board, not this paragraph, for the current state.
+At the last update the Ready queue was AI-100 and AI-111; the P2 AI-100 (eligible
+once AI-099 was Done) is taken ahead of the P3 AI-111; AI-101 is Blocked on Docker
+verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
+workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099,
+AI-102, AI-104 and AI-105 are Done, clearing the P1 correctness and persistence
+bugs. Read the board, not this paragraph, for the current state.
 
 A sensible progression:
 
@@ -581,6 +581,23 @@ Acceptance criteria:
   with an explicit repair path; no silent deletion or timestamp guessing.
 - Relative, absolute, tilde and in-memory database paths behave as documented, with
   no accidental creation at a different location.
+
+Resolution (Done): stored timestamps are formatted by field with a four-digit
+year, so the representation is fixed-width across the whole supported range (years
+1 through 9999, with fractional seconds and any input offset), sorts in string
+order and round-trips through SQLite for events and incidents; a year below 1000
+no longer serialises to a value the reader cannot parse. `parse_timestamp`
+left-pads a legacy unpadded year and retries, so a row written by the earlier code
+still reads back as the year it names rather than failing (an exact read, not a
+guess). The `connect` helper expands the path once and uses the expanded form for
+both the parent directory and the connection, so a `~` path resolves to home, a
+relative path stays relative to the working directory and an absolute path is used
+as given, with no database created at a different location than the directory
+prepared for it. Added format and parse unit tests over the extreme years, event
+and incident store round-trips, an early-year API regression and tilde and
+relative path tests, and documented the tilde and in-memory behaviour in
+`docs/deployment.md`. Python's own `datetime` bounds the year to 1 through 9999, so
+no narrower bound is added.
 
 ## Efficiency and reporting
 
