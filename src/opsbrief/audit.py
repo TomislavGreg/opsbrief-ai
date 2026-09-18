@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from opsbrief.brief.schema import DailyBrief
 from opsbrief.incidents.summary import IncidentSummary
 from opsbrief.references import SourceReference
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import Confidence, WarningCode
 
 
@@ -75,6 +76,11 @@ class GenerationAudit(BaseModel):
         min_length=1,
         max_length=128,
         description="Identifier of the model that produced the summary, carried over unchanged.",
+    )
+    summary_status: SummaryStatus = Field(
+        description=(
+            "How the summary was produced (deterministic, model-unverified or unavailable)."
+        ),
     )
     prompt_version: str = Field(
         min_length=1,
@@ -140,6 +146,7 @@ def audit_daily_brief(brief: DailyBrief) -> GenerationAudit:
         kind=GenerationKind.DAILY_BRIEF,
         subject_id=None,
         model=brief.model,
+        summary_status=brief.summary_status,
         prompt_version=brief.prompt_version,
         output_version=brief.output_version,
         source_event_ids=list(brief.source_event_ids),
@@ -164,6 +171,7 @@ def audit_incident_summary(summary: IncidentSummary) -> GenerationAudit:
         kind=GenerationKind.INCIDENT_SUMMARY,
         subject_id=summary.incident_id,
         model=summary.model,
+        summary_status=summary.summary_status,
         prompt_version=summary.prompt_version,
         output_version=summary.output_version,
         source_event_ids=list(summary.source_event_ids),

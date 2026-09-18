@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "info"
     database_url: str = "sqlite:///./opsbrief.db"
-    ai_provider: str = "fake"
+    ai_provider: str = "deterministic"
     demo_data: bool = False
     read_only: bool = False
     redact_metadata_keys: str = ""

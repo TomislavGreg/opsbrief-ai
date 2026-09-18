@@ -16,6 +16,7 @@ _BRIEF = BriefPanel(
     summary="One integration keeps failing; deal with the ticketing failures first.",
     model="fake-1",
     confidence="high",
+    summary_status="model_unverified",
     notes=(),
 )
 
@@ -409,8 +410,46 @@ def test_page_renders_the_daily_brief_panel() -> None:
     assert "One integration keeps failing" in html
     # The panel names the model that phrased the summary and the confidence level.
     assert "Phrased by fake-1" in html
+    # Model prose is labelled unverified, kept separate from the confidence badge.
+    assert "not verified against the facts" in html
     assert "conf-high" in html
     assert ">high</span>" in html
+
+
+def _brief_view(brief: BriefPanel) -> DashboardView:
+    return DashboardView(
+        service_name="OpsBrief AI",
+        environment="production",
+        version="1.0",
+        links=(),
+        brief=brief,
+    )
+
+
+def test_a_deterministic_summary_is_marked_as_composed_not_model_written() -> None:
+    view = _brief_view(
+        BriefPanel(
+            summary="2 active risks across 5 events.",
+            model="deterministic",
+            confidence="high",
+            summary_status="deterministic",
+        )
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "Composed from the operational picture" in html
+    assert "Phrased by" not in html
+
+
+def test_an_unavailable_summary_is_marked_as_such() -> None:
+    view = _brief_view(
+        BriefPanel(summary="", model="fake", confidence="medium", summary_status="unavailable")
+    )
+
+    html = render_dashboard_page(view)
+
+    assert "No summary was produced" in html
 
 
 def test_brief_notes_are_rendered_when_the_picture_is_incomplete() -> None:
@@ -478,6 +517,7 @@ def test_brief_summary_is_escaped() -> None:
             summary="Feed <script>alert(1)</script> down",
             model="fake<1>",
             confidence="high",
+            summary_status="model_unverified",
         ),
     )
 

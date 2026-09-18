@@ -6,6 +6,7 @@ stays with the deterministic rules — and their output is treated as untrusted
 data, validated before use.
 """
 
+from opsbrief.ai.deterministic import DeterministicNarrativeProvider
 from opsbrief.ai.errors import AIProviderError
 from opsbrief.ai.factory import create_provider
 from opsbrief.ai.fake import FakeAIProvider
@@ -26,6 +27,7 @@ __all__ = [
     "AIProviderError",
     "CompletionRequest",
     "CompletionResponse",
+    "DeterministicNarrativeProvider",
     "FakeAIProvider",
     "create_provider",
 ]

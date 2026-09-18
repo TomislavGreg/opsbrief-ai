@@ -58,8 +58,11 @@ class BriefPanel:
     """The latest daily brief as the dashboard's brief panel shows it.
 
     The panel carries the model-phrased ``summary`` alongside the parts that let a
-    reader weigh it: the ``model`` that phrased it, the derived ``confidence`` level,
-    and the ``notes`` on where the picture is incomplete. The prioritized risks and
+    reader weigh it: the ``model`` that phrased it, the ``summary_status`` recording
+    how the summary was produced (composed deterministically, phrased by a model and
+    unverified, or unavailable), the derived ``confidence`` level, and the ``notes``
+    on where the picture is incomplete. ``summary_status`` and ``confidence`` are
+    separate: one weighs the prose, the other the evidence. The prioritized risks and
     the source references the full brief also holds are shown by the other panels
     and the JSON endpoints, so they are left out here. ``summary`` is empty when the
     provider was unavailable or returned nothing, and the render says so plainly.
@@ -68,6 +71,7 @@ class BriefPanel:
     summary: str
     model: str
     confidence: str
+    summary_status: str = "unavailable"
     notes: tuple[str, ...] = ()
 
 

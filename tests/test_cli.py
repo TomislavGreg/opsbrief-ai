@@ -12,6 +12,7 @@ from opsbrief.config import get_settings
 from opsbrief.events import Event, EventInput
 from opsbrief.risks import Risk, RiskSeverity
 from opsbrief.storage import EventStore
+from opsbrief.verification import SummaryStatus
 
 
 def make_brief(**overrides: object) -> DailyBrief:
@@ -76,12 +77,22 @@ def test_text_marks_no_next_actions_rather_than_dropping_the_section() -> None:
 def test_text_records_the_prompt_and_output_versions() -> None:
     text = render_text(make_brief())
 
-    assert "Prompt version brief-prompt/3; output version daily-brief/4" in text
+    assert "Prompt version brief-prompt/3; output version daily-brief/5" in text
 
 
 def test_text_states_the_confidence() -> None:
     # A brief with no warnings reads as full confidence.
     assert "Confidence: high" in render_text(make_brief())
+
+
+def test_text_states_the_summary_source() -> None:
+    # A deterministic summary is marked as composed from the picture, separate from
+    # the confidence in the evidence.
+    deterministic = render_text(make_brief(summary_status=SummaryStatus.DETERMINISTIC))
+    assert "Summary source: composed from the picture" in deterministic
+
+    unverified = render_text(make_brief(summary_status=SummaryStatus.MODEL_UNVERIFIED))
+    assert "Summary source: model prose, not verified against the facts" in unverified
 
 
 def test_text_marks_empty_sections_rather_than_dropping_them() -> None:
@@ -165,7 +176,9 @@ def test_json_format_emits_the_briefs_serialisation(
     parsed = json.loads(capsys.readouterr().out)
     assert parsed["risks"][0]["rule"] == "overdue_work"
     assert event_id in parsed["source_event_ids"]
-    assert parsed["model"] == "fake-1"
+    # The default build runs offline and composes the summary deterministically.
+    assert parsed["model"] == "deterministic"
+    assert parsed["summary_status"] == "deterministic"
 
 
 def test_empty_store_still_produces_a_brief_that_says_so(
@@ -198,8 +211,11 @@ def test_configured_excluded_fields_are_held_back_from_the_model(
     database_url: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # The unscripted fake provider echoes the material it is shown, so the summary
-    # reveals what the model saw. An excluded field is held back from it.
+    # reveals what the model saw. An excluded field is held back from it. This
+    # exercises the model path explicitly, since the default provider composes the
+    # summary from structure and asks no model.
     store_plain_event(database_url, subject="Steward Jane Doe did not report")
+    monkeypatch.setenv("OPSBRIEF_AI_PROVIDER", "fake")
     monkeypatch.setenv("OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS", "subject")
     get_settings.cache_clear()
 

@@ -119,7 +119,8 @@ def _brief_panel(brief: DailyBrief) -> BriefPanel:
     """Reduce a generated daily brief to the panel the dashboard shows it as.
 
     Only the parts the panel presents are carried: the model-phrased ``summary``,
-    the ``model`` that phrased it, the derived ``confidence`` level and the ``notes``
+    the ``model`` that phrased it, how the summary was produced (``summary_status``),
+    the derived ``confidence`` level and the ``notes``
     on where the picture is incomplete. The prioritized risks and source references
     the brief also holds are shown by the other panels and the JSON endpoints, so
     they are not duplicated here. No model takes part in this reduction.
@@ -128,6 +129,7 @@ def _brief_panel(brief: DailyBrief) -> BriefPanel:
         summary=brief.summary,
         model=brief.model,
         confidence=brief.confidence.value,
+        summary_status=brief.summary_status.value,
         notes=tuple(brief.notes),
     )
 
