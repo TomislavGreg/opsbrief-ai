@@ -17,9 +17,10 @@ than implied.
   default in the image).
 - One SQLite database file, holding the stored events and incidents. It is created
   on first use.
-- No external services. The only AI provider implemented so far is the
-  deterministic fake, which needs no model, no key and no network, so a default
-  deployment makes no outbound calls.
+- No external services. The default AI provider is the deterministic narrative
+  provider, which composes summaries from the structured picture with no model, no
+  key and no network, so a default deployment makes no outbound calls. The scripted
+  fake provider is available for tests.
 
 Because the state is a single file, a deployment is stateful in exactly one place.
 Everything else (the code, the settings) is disposable and rebuilt from the image
@@ -103,7 +104,7 @@ should be set deliberately for a real deployment.
 | `OPSBRIEF_ENVIRONMENT` | `development` | Free-form environment label reported by `/health`. Set to `production` (or your own label) so a reader can tell instances apart. |
 | `OPSBRIEF_LOG_LEVEL` | `info` | Log level label. |
 | `OPSBRIEF_DATABASE_URL` | `sqlite:///./opsbrief.db` | The SQLite database. Only `sqlite:///` URLs are accepted. Point this at a path on durable storage (see [Persistence](#persistence)). |
-| `OPSBRIEF_AI_PROVIDER` | `fake` | The AI provider. Only `fake` is implemented; an unknown name is refused at startup. |
+| `OPSBRIEF_AI_PROVIDER` | `deterministic` | The AI provider. `deterministic` composes summaries from the structured picture offline; `fake` is the scripted test provider. An unknown name is refused at startup. |
 | `OPSBRIEF_READ_ONLY` | `false` | When true, every write route (event and batch ingestion, incident declaration and mutation, and the webhook) is refused with 403 while reads keep working. Demo-data mode turns this on by default. See [Read-only mode](#read-only-mode). |
 | `OPSBRIEF_DEMO_DATA` | `false` | When true, seed a fresh (empty) store with synthetic match-day data on startup and serve read-only (see `OPSBRIEF_READ_ONLY`). Leave false for a real deployment. |
 | `OPSBRIEF_REDACT_METADATA_KEYS` | empty | Extra metadata key terms whose values are masked before storage, comma-separated. Adds to the built-in set. |

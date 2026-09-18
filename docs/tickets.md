@@ -33,10 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the P2 AI-100 was Done, so the Ready queue was AI-111; AI-101 is
-Blocked on Docker verification; AI-124 is Blocked on a maintainer settings action
-and AI-056 on a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097,
-AI-098, AI-099, AI-100, AI-102, AI-104 and AI-105 are Done, clearing the P1
+At the last update the P2 AI-100 and AI-111 were Done, so the Ready queue was
+replenished with AI-103 (validate configuration at startup and make readiness
+truthful), the next eligible P2 whose dependencies are all Done; AI-101 is Blocked
+on Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
+on a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098,
+AI-099, AI-100, AI-102, AI-104, AI-105 and AI-111 are Done, clearing the P1
 correctness and persistence bugs. Read the board, not this paragraph, for the
 current state.
 
@@ -753,6 +755,29 @@ Acceptance criteria:
   presented as semantic proof.
 - API, dashboard, CLI and docs explain the distinction, with appropriate
   output-version changes. The existing fallback preserves structured evidence.
+
+Resolution (Done): made completeness and prose-verification separate explicit
+concepts. Confidence still weighs the evidence; a new `SummaryStatus`
+(`deterministic`, `model_unverified`, `unavailable`) records how the prose was
+produced and is carried on the brief, the incident summary and the generation audit,
+independent of confidence, so a model summary that contradicts the deterministic
+risks is labelled unverified rather than allowed to raise trust in the words. Added
+a `DeterministicNarrativeProvider`, now the default, that composes a short summary
+from the structured picture with no model (the risk count, the most urgent risk and
+its first suggested step for a brief; status, severity, span, missing citations and
+any resolution note for an incident), so an offline summary states the actual
+prioritised picture with no prompt scaffolding and is stable for equal inputs; the
+scripted fake is kept for tests. `generate_brief` and `generate_incident_summary`
+compose deterministically for that provider (no model call, no prompt-budget
+warning), label a model's prose `model_unverified`, and mark an outage or empty
+reply `unavailable` with the structured evidence preserved. Citations come only from
+the structured picture (never parsed out of prose) and no citation whitelist is
+presented as proof. Bumped the output versions to `daily-brief/5` and
+`incident-summary/4`; surfaced the distinction on the dashboard brief panel, in the
+`opsbrief` text output, and in the README, `.env.example` and `docs/deployment.md`.
+Added narrative unit tests, generate-level tests for each status, and adversarial
+trust fixtures (contradiction, invented citations, instruction-like subjects, empty
+and outage replies) across both generation paths.
 
 ### AI-112: Add one opt-in real AI provider with bounded execution
 

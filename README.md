@@ -169,10 +169,24 @@ produced it.
   contract and an `AIProvider` protocol that turns already-assembled material into
   prose, used only for phrasing and never for deciding risks, with its output
   treated as untrusted data.
-- A deterministic fake AI provider that returns scripted or echoed completions
-  without calling a real model, and a `create_provider` factory that selects the
-  provider named by `OPSBRIEF_AI_PROVIDER`, so tests and local runs are
-  repeatable and offline.
+- A deterministic default AI provider that composes a short operational summary
+  from the structured picture (the risk count, the most urgent risk and its first
+  suggested step, or an all-clear; for an incident its status, severity, span and
+  any resolution note) with no model, so the default offline build produces a real
+  summary rather than an echo of the prompt. A scripted fake provider is kept for
+  tests, and a `create_provider` factory selects the provider named by
+  `OPSBRIEF_AI_PROVIDER` (`deterministic` by default, `fake` for tests), so tests
+  and local runs are repeatable and offline.
+- Evidence completeness and prose verification kept as separate judgements: a brief
+  and an incident summary carry a `summary_status` recording how the prose was
+  produced (composed deterministically from the picture, phrased by a model and left
+  unverified, or unavailable), independent of the `confidence` that weighs the
+  evidence. So a model summary that contradicts the deterministic risks is labelled
+  unverified rather than allowed to raise trust in the words, the structured risks,
+  actions and evidence stay authoritative and always shown, and no citation
+  whitelist is presented as proof the prose is correct. The status surfaces on the
+  brief and incident-summary responses and their audits, on the dashboard brief
+  panel and in the `opsbrief` text output.
 - A deterministic daily-brief context: the material a brief is built from,
   assembled from the stored events without a model — the current risks in
   priority order, a bounded view of the most recent events, notes on where the
@@ -374,8 +388,9 @@ produced it.
   brief, all events, incidents, health and the API docs). The daily-brief panel is the
   current brief across the whole
   event history at request time, phrased the same way `GET /brief` phrases it: it shows
-  the model-written summary with the model that phrased it, the derived confidence level
-  as a badge, and the notes on where the picture is incomplete, degrading to a plain
+  the summary with how it was produced (composed from the picture, unverified model
+  prose, or unavailable) stated apart from the derived confidence level as a badge, and
+  the notes on where the picture is incomplete, degrading to a plain
   message when the provider returns no summary rather than blanking the page. The
   active-risks panel runs the canonical rule set over the whole event
   history at request time, the same way `GET /risks` does, and shows each risk with
@@ -838,8 +853,9 @@ back to:
 {
   "generated_at": "2026-07-29T18:00:00Z",
   "summary": "One integration keeps failing and a safety inspection is overdue; deal with the ticketing failures first.",
+  "summary_status": "model_unverified",
   "model": "fake-1",
-  "output_version": "daily-brief/4",
+  "output_version": "daily-brief/5",
   "prompt_version": "brief-prompt/1",
   "confidence": "high",
   "risks": [
@@ -897,9 +913,13 @@ Only the `summary` comes from a language model, and it is treated as untrusted �
 collapsed to a single line and truncated to a bounded length — so injected
 formatting or unbounded text cannot shape the brief. Everything a reader acts on
 is carried from the deterministic context, as described under
-[Daily Briefs](#daily-briefs). The active model is chosen by
-`OPSBRIEF_AI_PROVIDER`; the default build phrases with the deterministic fake
-provider, which reports itself as `fake-1`. The model is only a phrasing layer,
+[Daily Briefs](#daily-briefs). The active provider is chosen by
+`OPSBRIEF_AI_PROVIDER`; the default build composes the summary from the structured
+picture with no model (reported as `deterministic`, with `summary_status`
+`deterministic`), so an offline brief still reads as a real summary. `summary_status`
+records how the prose was produced, kept separate from `confidence`: a model summary
+is `model_unverified` and never allowed to raise trust in words that contradict the
+risks. The model is only a phrasing layer,
 so it never fails the brief: when it returns no usable summary, or when the
 provider is unavailable, the endpoint still answers with the deterministic
 picture and a note recording which gap occurred, rather than an error. Wherever
@@ -1592,7 +1612,27 @@ not lower confidence. Both the warnings and the level are deterministic and hold
 no model involvement, like the evidence they describe. When these fields were
 added a daily brief reported `output_version` `daily-brief/3` and an incident
 summary `incident-summary/3`; a daily brief has since gained suggested next
-actions and reports `daily-brief/4` (see [Suggested Next Actions](#suggested-next-actions)).
+actions (`daily-brief/4`, see [Suggested Next Actions](#suggested-next-actions))
+and a summary-verification status (`daily-brief/5` and `incident-summary/4`, below).
+
+`confidence` weighs the evidence; it says nothing about whether the words match it.
+That is a separate judgement, `summary_status`, which records how the prose was
+produced:
+
+| Status | Meaning |
+|--------|---------|
+| `deterministic` | Composed by the service from the structured picture, with no model. It restates the facts, so it is trustworthy by construction. |
+| `model_unverified` | Phrased by a language model and not checked against the facts. The model may contradict them; a reader weighs it against the risks, actions and evidence, which are always shown. |
+| `unavailable` | No summary was produced (the provider was unavailable or returned nothing); the structured picture stands on its own. |
+
+The two are independent, so complete evidence (high confidence) can still carry an
+unverified model summary. Keeping them apart means a model saying "nothing is
+blocked" over a deterministic blocked risk is labelled unverified rather than
+allowed to raise trust in the words: the structured risks and actions stay
+authoritative, citations come only from the structured picture (never parsed out of
+the prose), and no citation whitelist is presented as proof the prose is correct.
+The default offline build composes a `deterministic` summary; the scripted fake
+produces `model_unverified` prose for tests.
 
 ## Generation Audit Records
 
@@ -1948,8 +1988,17 @@ An `AIProvider` is a small protocol: a stable `name` and a single
 `complete(request)` method. A provider returns what the model produced and does
 not judge it; when it cannot produce a usable completion — a transport failure, a
 timeout, an unparseable reply — it raises `AIProviderError` rather than returning
-an empty or invented one. Concrete providers, starting with a deterministic fake
-for tests, implement this protocol in their own modules.
+an empty or invented one. Concrete providers implement this protocol in their own
+modules.
+
+The provider named by `OPSBRIEF_AI_PROVIDER` is built by `create_provider`. The
+default, `deterministic`, is the `DeterministicNarrativeProvider`: it phrases
+nothing with a model and instead signals the generation layer to compose the
+summary from the structured picture it already holds, so the default offline build
+produces a real summary (marked `summary_status` `deterministic`) rather than an
+echo of the prompt material. The scripted `fake` provider is kept for tests, and
+its output is treated as `model_unverified` prose. An unknown name is refused at
+startup.
 
 ### The fake provider
 
@@ -2371,10 +2420,12 @@ panels are rendered inline, against the same endpoints.
 
 The daily-brief panel is the current brief across the whole event history at the
 moment of the request, phrased the same way `GET /brief` phrases it. It shows the
-model-written summary alongside what lets a reader weigh it: the model that phrased
-it, the derived confidence level as a badge, and the notes on where the picture is
-incomplete. Only the summary comes from a language model, and it is carried through
-already bounded and collapsed as untrusted output; the prioritized risks and source
+summary alongside what lets a reader weigh it: how the summary was produced (composed
+from the picture, unverified model prose, or unavailable), stated apart from the
+derived confidence level as a badge, and the notes on where the picture is
+incomplete. Only a model-phrased summary comes from a language model, and it is
+carried through already bounded and collapsed as untrusted output and labelled
+unverified; the prioritized risks and source
 references the full brief also holds are shown by the other panels and the JSON
 endpoints, so they are not duplicated here. When the model returns no summary, or the
 provider is unavailable, the panel says so plainly and the notes explain why, so a
@@ -2618,7 +2669,7 @@ dashboard evidence links.
 | AI-100 | Keep synchronous webhook ingestion off the event loop | Correctness and safety | Done |
 | AI-101 | Give the container writable persistent SQLite storage | Correctness and safety | Blocked |
 | AI-102 | Make external exposure and public demo writes safe by default | Correctness and safety | Done |
-| AI-103 | Validate configuration at startup and make readiness truthful | Correctness and safety | Backlog |
+| AI-103 | Validate configuration at startup and make readiness truthful | Correctness and safety | Ready |
 | AI-104 | Align input validation with stored and generated output contracts | Correctness and safety | Done |
 | AI-105 | Make timestamps and database paths round-trip reliably | Correctness and safety | Done |
 | AI-106 | Reuse one reporting context per dashboard request | Efficiency and reporting | Backlog |
@@ -2626,7 +2677,7 @@ dashboard evidence links.
 | AI-108 | Bound risk lists and dashboard and timeline previews without dropping analysis | Efficiency and reporting | Backlog |
 | AI-109 | Enforce event idempotency in SQLite | Efficiency and reporting | Backlog |
 | AI-110 | Persist and retrieve the audit of an exact generation | Efficiency and reporting | Backlog |
-| AI-111 | Separate evidence completeness from prose verification | Efficiency and reporting | Ready |
+| AI-111 | Separate evidence completeness from prose verification | Efficiency and reporting | Done |
 | AI-112 | Add one opt-in real AI provider with bounded execution | Efficiency and reporting | Backlog |
 | AI-113 | Add reporting periods, source freshness and changes since a prior brief | Efficiency and reporting | Backlog |
 | AI-114 | Include tracked incidents and recent resolutions in the daily brief | Efficiency and reporting | Backlog |
@@ -2655,9 +2706,11 @@ one ticket at a time, and records blockers rather than stalling.
 A run selects the highest-priority eligible Ready ticket whose dependencies are all
 Done. After a ticket is completed or blocked, it replenishes a small Ready queue
 from eligible Backlog items so the next run has work ready; a ticket blocked on one
-unavailable tool never stalls unrelated eligible work. The P2 AI-100 is now Done,
-so the current Ready queue is AI-111. AI-102, AI-104 and AI-105 are also Done,
-clearing the P1 correctness and persistence bugs.
+unavailable tool never stalls unrelated eligible work. The P2 AI-100 and AI-111 are
+now Done, so the Ready queue is replenished with AI-103 (validate configuration at
+startup and make readiness truthful), the next eligible P2 whose dependencies are
+all Done. AI-102, AI-104 and AI-105 are also Done, clearing the P1 correctness and
+persistence bugs.
 
 AI-092 was reopened after its first implementation and is now Done again. The
 first implementation grouped work by entity but read the single latest event as
@@ -2810,6 +2863,7 @@ it is not picked up and left half-finished.
 
 ## Recent Progress
 
+- 2026-09-18 - Separated evidence completeness from prose verification and improved offline summaries (AI-111): a scripted model could say "no work is blocked" alongside a deterministic blocked risk while the output kept high confidence, and the default fake echoed prompt material rather than composing a summary. Added a `SummaryStatus` recording how the prose was produced (composed deterministically from the picture, phrased by a model and left unverified, or unavailable), kept separate from `confidence`, which weighs the evidence, so a model summary can no longer raise trust in words that contradict the facts. Added a default `DeterministicNarrativeProvider` that composes a short operational summary from the structured picture with no model (the risk count, the most urgent risk and its first step for a brief; status, severity, span and any resolution note for an incident), keeping the scripted fake for tests. Wired both generators to mark the deterministic, model-unverified and unavailable paths, carried `summary_status` on the brief, incident summary and generation audit, bumped the output versions to `daily-brief/5` and `incident-summary/4`, and surfaced the distinction on the dashboard and in the `opsbrief` text output. Added narrative, generate-level and adversarial trust fixtures (contradiction, invented citations, instruction-like subjects, empty and outage replies) and updated the docs.
 - 2026-09-18 - Kept synchronous webhook ingestion off the event loop (AI-100): the async `POST /webhooks/events` handler read the body asynchronously but then verified the HMAC signature, parsed the body and wrote to SQLite synchronously on the event loop, so a slow persistence step stalled the loop and every request it was serving (a controlled persistence pause pushed an independent lightweight request from milliseconds to the length of the pause). Extracted the blocking processing into one synchronous helper and dispatched it through Starlette's `run_in_threadpool`, keeping the async body read on the loop. The call is awaited, so the 202 is still returned only after the transaction commits and a storage exception still surfaces as an error rather than a premature success; valid batches stay atomic and idempotency is unchanged, and no background queue or fire-and-forget write is introduced. Added a regression test that pauses persistence and asserts the loop still resumes an awaiting coroutine and serves `GET /health` promptly.
 - 2026-09-17 - Made timestamps and database paths round-trip reliably (AI-105): an event or incident dated in a year below 1000 was serialised with `strftime`, whose `%Y` does not zero-pad a small year on every platform, so the stored text (for example `1-01-01T...`) could not be read back and a later list or brief read failed with 500; separately, the `connect` helper expanded a leading `~` when creating the parent directory but handed the unexpanded path to SQLite, so a `sqlite:///~/...` URL created the database under a literal `~` directory. Formatted stored timestamps by field with a four-digit year, so the representation is fixed-width across the whole supported range (years 1 through 9999), sorts in string order and round-trips through SQLite for events and incidents, and made the parser left-pad a legacy unpadded year and retry so an old row still reads back. Expanded the database path once and used the expanded form for both the directory and the connection, so a tilde path resolves to home, a relative path stays relative to the working directory and an absolute path is used as given. Added format and parse unit tests over the extreme years, store round-trips, an early-year API regression and tilde and relative path tests, and documented the tilde and in-memory path behaviour in `docs/deployment.md`.
 - 2026-09-17 - Aligned input validation with what storage and generated output can hold (AI-104): a whitespace-only entity type, entity id or external id was stripped to an empty string and accepted, a non-finite metadata number (NaN or infinity) was stored and then serialised to null, a whitespace-only incident title passed, and an incident's cited event ids were unbounded in count and length, so a 65-character id was stored and then failed with 500 when its source reference (capped at 64) was built. Added a minimum length to the optional identifier fields, a finite-number check on metadata, whitespace stripping and a blank check on incident titles, a per-id length cap matching the Event and SourceReference limits, and a count bound on the evidence enforced on declarations, links and cumulative links. New incident declarations and event links must now cite ids the event store holds, refused with 422 otherwise, while reading a stored incident still names a cited event the store no longer holds as a gap rather than failing. Added schema and service unit tests and updated the incident API tests to declare over real events and to store a missing-evidence record directly for the read-time compatibility path.
@@ -2823,7 +2877,7 @@ it is not picked up and left half-finished.
 - 2026-09-08 - Corrected the work-state projection behind the overdue and blocked rules (AI-092, reopened): the rules read an entity's single latest event as its current state, so an informational event (one stating neither a status nor a deadline, such as a progress comment) wrongly cleared a blocked, overdue task, and one arriving between two blocked reports reset the blocked duration and lowered the severity from high back to medium. The rules now fold an entity's history into a projected state where informational events are transparent, an omitted deadline on an update keeps the prior one while a terminal state clears it, and the blocked run is traced over each event's effective status so a comment during a block does not restart its clock. Risks still cite the event that set the deadline or began the block. Added unit tests and end-to-end behavioural regressions through risk reporting and a generated brief.
 - 2026-09-07 - Prepared the board and routine for future runs: reopened AI-092 after finding its work-state implementation treats an informational (status-less, deadline-less) event as a state replacement, wrongly clearing a blocked and overdue task and resetting the blocked duration on a later re-report; recorded those as regression scenarios in the AI-092 body for the next implementation run, with the requirement that informational events preserve known state and continuous blocked duration and that the fix distinguish an omitted deadline from an explicitly removed one. Set AI-092, AI-096 and AI-098 Ready, kept AI-093 dependent on the corrected AI-092, and marked AI-101 Blocked on Docker verification with its owner. Added `docs/routine.md`, a standing routine instruction set (resume from the board and ticket bodies, one ticket at a time, verify on the real PR-head and merged-main commits, record blockers, avoid filler), linked from `CLAUDE.md`, and recorded that real-data deployments should exclude `incident_free_text` (carried to AI-112). No application code changed.
 - 2026-09-07 - Extended AI context exclusion to cover all prompt material (AI-094): an excluded field was masked in the plain event and timeline lines but still reached the model through prose derived from it, so excluding `subject` left it visible in the risk titles and in an incident title declared from a risk, and excluding `occurred_at` left it visible in the incident span. Those derived surfaces are now held back as whole units (never scanned and rewritten), so a held-back field cannot leak through them. Added a separate `incident_free_text` opt-out control that holds back an incident's free-form title and resolution note, which are operator text rather than event fields. The deterministic structured output is unchanged; the brief and incident-summary prompt versions were bumped because the material a model is shown changed. Added unit and end-to-end capturing-fake regressions across both generation paths.
-- 2026-09-07 - Evaluated work by its current state in the overdue and blocked rules (AI-092): events that name a stable entity (a source with an entity type and id) are grouped and only the entity's most recent event, its current state, is judged. A later resolved or cancelled event now clears the earlier blocked or overdue risk, a later deadline replaces an earlier one, and repeated reports of the same work raise one risk rather than one each. This makes the rules honour the integration contract, that a later state change for the same entity id clears a situation, which the per-event rules did not. Events that name no entity are still judged individually, and the whole history stays stored as evidence. Added a work-state projection module, unit tests and a table-driven behavioural suite through risk reporting and a generated brief.
+
 ## Future Game Center Integration
 
 OpsBrief AI is a standalone open-source service and contains no private,
