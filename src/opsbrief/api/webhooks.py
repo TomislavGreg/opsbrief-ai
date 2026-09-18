@@ -16,6 +16,7 @@ from collections.abc import Iterable
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from opsbrief.api.dependencies import EventStoreDependency, SensitiveMetadataKeysDependency
 from opsbrief.config import get_settings
@@ -133,7 +134,13 @@ async def ingest_events(
 
     body = await request.body()
 
-    return _process_signed_delivery(
+    # The body read is async, but the signature check, parsing and SQLite write are
+    # blocking. Run them in a worker thread so a slow persistence step cannot stall
+    # the event loop and the requests it is serving. The call is awaited, so the 202
+    # is still returned only after the transaction has committed, and a storage
+    # exception still surfaces as an error rather than a premature success.
+    return await run_in_threadpool(
+        _process_signed_delivery,
         secret=settings.webhook_secret,
         tolerance_seconds=settings.webhook_timestamp_tolerance_seconds,
         body=body,
