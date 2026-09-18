@@ -12,6 +12,7 @@ and parsed.
 
 import json
 import time
+from collections.abc import Iterable
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
@@ -20,6 +21,7 @@ from opsbrief.api.dependencies import EventStoreDependency, SensitiveMetadataKey
 from opsbrief.config import get_settings
 from opsbrief.events import EventBatch, EventBatchResult
 from opsbrief.services import record_events
+from opsbrief.storage import EventStore
 from opsbrief.webhooks import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
@@ -28,6 +30,73 @@ from opsbrief.webhooks import (
 )
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+def _process_signed_delivery(
+    *,
+    secret: str,
+    tolerance_seconds: int,
+    body: bytes,
+    timestamp_header: str | None,
+    signature_header: str | None,
+    store: EventStore,
+    sensitive_keys: Iterable[str],
+) -> EventBatchResult:
+    """Authenticate, parse and store a signed delivery.
+
+    This is the synchronous core of the webhook: HMAC verification over the raw
+    bytes, UTF-8 decoding, JSON parsing, contract validation and the SQLite write.
+    All of it is CPU- and IO-bound and blocking, so the async handler runs it in a
+    worker thread rather than on the event loop. The same ``HTTPException``
+    responses the handler documents are raised here and propagate back across the
+    thread boundary unchanged:
+
+    - 401 when the signature is missing, malformed, expired or mismatched;
+    - 422 when the body is not valid UTF-8, not valid JSON, or fails the contract.
+
+    Nothing is stored unless the batch validates, and the store is written to only
+    after authentication succeeds.
+    """
+    try:
+        verify_webhook_signature(
+            secret=secret,
+            body=body,
+            timestamp_header=timestamp_header,
+            signature_header=signature_header,
+            now=int(time.time()),
+            tolerance_seconds=tolerance_seconds,
+        )
+    except WebhookAuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=exc.reason) from exc
+
+    # The signature is over the raw bytes, so it is verified before the body is
+    # decoded. A validly signed but malformed body is a client error, not a server
+    # one: invalid UTF-8 and invalid JSON are each mapped to 422 rather than raising.
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="webhook body is not valid UTF-8",
+        ) from exc
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="webhook body is not valid JSON",
+        ) from exc
+
+    try:
+        batch = EventBatch.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=json.loads(exc.json()),
+        ) from exc
+
+    return record_events(store, batch, sensitive_keys=sensitive_keys)
 
 
 @router.post(
@@ -64,43 +133,12 @@ async def ingest_events(
 
     body = await request.body()
 
-    try:
-        verify_webhook_signature(
-            secret=settings.webhook_secret,
-            body=body,
-            timestamp_header=request.headers.get(TIMESTAMP_HEADER),
-            signature_header=request.headers.get(SIGNATURE_HEADER),
-            now=int(time.time()),
-            tolerance_seconds=settings.webhook_timestamp_tolerance_seconds,
-        )
-    except WebhookAuthError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=exc.reason) from exc
-
-    # The signature is over the raw bytes, so it is verified before the body is
-    # decoded. A validly signed but malformed body is a client error, not a server
-    # one: invalid UTF-8 and invalid JSON are each mapped to 422 rather than raising.
-    try:
-        text = body.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="webhook body is not valid UTF-8",
-        ) from exc
-
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="webhook body is not valid JSON",
-        ) from exc
-
-    try:
-        batch = EventBatch.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=json.loads(exc.json()),
-        ) from exc
-
-    return record_events(store, batch, sensitive_keys=sensitive_keys)
+    return _process_signed_delivery(
+        secret=settings.webhook_secret,
+        tolerance_seconds=settings.webhook_timestamp_tolerance_seconds,
+        body=body,
+        timestamp_header=request.headers.get(TIMESTAMP_HEADER),
+        signature_header=request.headers.get(SIGNATURE_HEADER),
+        store=store,
+        sensitive_keys=sensitive_keys,
+    )
