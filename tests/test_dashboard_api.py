@@ -154,9 +154,10 @@ def test_dashboard_shows_the_daily_brief_panel(client: TestClient) -> None:
 
     body = client.get("/dashboard").text
 
-    # The brief panel is present and names the model that phrased its summary.
+    # The brief panel is present. The default build composes the summary from the
+    # structured picture, so the panel says so rather than crediting a model.
     assert "Daily brief" in body
-    assert "Phrased by fake-1" in body
+    assert "Composed from the operational picture" in body
 
 
 def test_dashboard_brief_reports_confidence_on_an_empty_store(client: TestClient) -> None:

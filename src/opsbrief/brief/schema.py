@@ -22,6 +22,7 @@ from opsbrief.brief.actions import NextAction, suggest_next_actions
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import Confidence, GenerationWarning, assess_confidence
 
 #: Upper bound, in characters, on a brief's model-phrased summary. The summary is
@@ -34,7 +35,7 @@ MAX_SUMMARY_LENGTH = 1_000
 #: one and a stored brief stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`DailyBrief` change in a way a consumer would
 #: need to notice.
-BRIEF_OUTPUT_VERSION = "daily-brief/4"
+BRIEF_OUTPUT_VERSION = "daily-brief/5"
 
 #: Version of the prompt a brief's summary was produced with — the instructions
 #: and the context rendering in :mod:`opsbrief.brief.generate`. Every generated
@@ -194,7 +195,12 @@ class DailyBrief(BaseModel):
     picture but never change what it says. Where the picture is incomplete or
     unphrased, the brief says so twice over: ``notes`` in prose and ``warnings`` as
     structured, machine-readable records, and ``confidence`` sums those warnings
-    into a single level a reader can weigh the brief by. Alongside the flat
+    into a single level a reader can weigh the brief by. Separately,
+    ``summary_status`` records how the ``summary`` itself was produced: composed
+    deterministically from the picture, phrased by a model and left unverified, or
+    unavailable. It is independent of ``confidence`` (which weighs the evidence), so
+    a model summary that contradicts the risks is labelled unverified rather than
+    allowed to raise the reader's trust in the words. Alongside the flat
     ``source_event_ids``, ``references`` resolves each of those ids to what the
     event was, in the same order, so the brief is self-describing and a reader need
     not look every cited event up separately. ``next_actions`` names one suggested
@@ -218,6 +224,14 @@ class DailyBrief(BaseModel):
     summary: str = Field(
         max_length=MAX_SUMMARY_LENGTH,
         description="The operational picture in prose, phrased by the model; may be empty.",
+    )
+    summary_status: SummaryStatus = Field(
+        default=SummaryStatus.UNAVAILABLE,
+        description=(
+            "How the summary was produced and how far to trust it: composed "
+            "deterministically from the picture, phrased by a model and unverified, "
+            "or unavailable. Separate from confidence, which weighs the evidence."
+        ),
     )
     model: str = Field(
         min_length=1,

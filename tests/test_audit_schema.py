@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from opsbrief.audit import GenerationAudit, GenerationKind
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import Confidence, WarningCode
 
 
@@ -12,6 +13,7 @@ def make_audit(**overrides: object) -> GenerationAudit:
     payload: dict[str, object] = {
         "kind": GenerationKind.DAILY_BRIEF,
         "model": "fake-1",
+        "summary_status": SummaryStatus.MODEL_UNVERIFIED,
         "prompt_version": "brief-prompt/1",
         "output_version": "daily-brief/4",
         "source_event_ids": ["e1", "e2"],
@@ -30,6 +32,7 @@ def test_a_record_carries_what_produced_the_output() -> None:
 
     assert audit.kind is GenerationKind.DAILY_BRIEF
     assert audit.model == "fake-1"
+    assert audit.summary_status is SummaryStatus.MODEL_UNVERIFIED
     assert audit.prompt_version == "brief-prompt/1"
     assert audit.output_version == "daily-brief/4"
     assert audit.source_event_ids == ["e17", "e18"]

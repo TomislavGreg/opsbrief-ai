@@ -2,7 +2,13 @@
 
 from datetime import UTC, datetime, timedelta
 
-from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse, FakeAIProvider
+from opsbrief.ai import (
+    AIProviderError,
+    CompletionRequest,
+    CompletionResponse,
+    DeterministicNarrativeProvider,
+    FakeAIProvider,
+)
 from opsbrief.events import Event, EventInput
 from opsbrief.incidents import (
     INCIDENT_SUMMARY_OUTPUT_VERSION,
@@ -14,6 +20,7 @@ from opsbrief.incidents import (
     generate_incident_summary,
 )
 from opsbrief.incidents.summary import DEFAULT_INCIDENT_INSTRUCTIONS
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import Confidence, WarningCode
 
 NOW = datetime(2026, 8, 14, 18, 0, tzinfo=UTC)
@@ -350,6 +357,36 @@ def test_a_provider_failure_records_the_provider_as_the_model() -> None:
     result = generate_incident_summary(make_incident(["e1"]), [make_event("e1")], FailingProvider())
 
     assert result.model == "failing"
+
+
+def test_the_deterministic_provider_composes_the_summary_offline() -> None:
+    incident = make_incident(["e1", "e2"])
+    events = [make_event("e1", minutes_ago=90), make_event("e2", minutes_ago=10)]
+
+    result = generate_incident_summary(incident, events, DeterministicNarrativeProvider())
+
+    assert result.summary_status is SummaryStatus.DETERMINISTIC
+    assert result.model == "deterministic"
+    assert result.summary  # a real sentence, not an echo of the prompt
+    assert "Timeline (oldest first)" not in result.summary  # no prompt scaffolding
+    assert WarningCode.MODEL_UNAVAILABLE not in {w.code for w in result.warnings}
+
+
+def test_incident_model_prose_is_labelled_unverified() -> None:
+    provider = FakeAIProvider(responses=["The incident is fully resolved and closed."])
+    incident = make_incident(["e1"])
+
+    result = generate_incident_summary(incident, [make_event("e1")], provider)
+
+    assert result.summary_status is SummaryStatus.MODEL_UNVERIFIED
+    # The prose does not change the incident's structured status.
+    assert result.status is IncidentStatus.OPEN
+
+
+def test_an_incident_outage_marks_the_summary_unavailable() -> None:
+    result = generate_incident_summary(make_incident(["e1"]), [make_event("e1")], FailingProvider())
+
+    assert result.summary_status is SummaryStatus.UNAVAILABLE
 
 
 def make_many_events(count: int) -> list[Event]:

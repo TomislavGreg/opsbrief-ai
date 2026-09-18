@@ -30,6 +30,7 @@ from opsbrief.exclusion import (
     shown_value,
 )
 from opsbrief.incidents.lifecycle import IncidentStatus
+from opsbrief.incidents.narrative import compose_incident_narrative
 from opsbrief.incidents.schema import Incident, IncidentSeverity
 from opsbrief.incidents.timeline import (
     IncidentTimeline,
@@ -38,6 +39,7 @@ from opsbrief.incidents.timeline import (
 )
 from opsbrief.prompt_budget import BudgetedMaterial, Section, render_budgeted
 from opsbrief.references import SourceReference, build_source_references
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import Confidence, GenerationWarning, WarningCode, assess_confidence
 
 #: Upper bound, in characters, on an incident summary's model-phrased text. The
@@ -50,7 +52,7 @@ MAX_INCIDENT_SUMMARY_LENGTH = 1_000
 #: and a stored summary stays interpretable after the shape changes. Bump this
 #: whenever the fields of :class:`IncidentSummary` change in a way a consumer would
 #: need to notice.
-INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/3"
+INCIDENT_SUMMARY_OUTPUT_VERSION = "incident-summary/4"
 
 #: Version of the prompt an incident summary was produced with: the instructions
 #: and the material rendering in this module. Every summary records it, so its
@@ -82,8 +84,12 @@ class IncidentSummary(BaseModel):
     model just as an incident traces to its events. Where the picture is
     incomplete or unphrased, the summary says so twice over: ``notes`` in prose and
     ``warnings`` as structured, machine-readable records, and ``confidence`` sums
-    those warnings into a single level a reader can weigh the summary by.
-    ``output_version`` names the
+    those warnings into a single level a reader can weigh the summary by. Separately,
+    ``summary_status`` records how the ``summary`` itself was produced: composed
+    deterministically from the picture, phrased by a model and left unverified, or
+    unavailable. It is independent of ``confidence`` (which weighs the evidence), so
+    a model summary that contradicts the picture is labelled unverified rather than
+    trusted. ``output_version`` names the
     shape it was produced in and ``prompt_version`` the prompt that phrased it, so a
     stored summary stays interpretable and a change in structure or phrasing stays
     visible.
@@ -114,6 +120,14 @@ class IncidentSummary(BaseModel):
     summary: str = Field(
         max_length=MAX_INCIDENT_SUMMARY_LENGTH,
         description="The incident in prose, phrased by the model; may be empty.",
+    )
+    summary_status: SummaryStatus = Field(
+        default=SummaryStatus.UNAVAILABLE,
+        description=(
+            "How the summary was produced and how far to trust it: composed "
+            "deterministically from the picture, phrased by a model and unverified, "
+            "or unavailable. Separate from confidence, which weighs the evidence."
+        ),
     )
     model: str = Field(
         min_length=1,
@@ -345,25 +359,27 @@ def generate_incident_summary(
     events = list(events)
     timeline = build_incident_timeline(incident, events)
     references = build_source_references(incident.event_ids, events)
-    material = build_incident_material(incident, timeline, excluded_fields=excluded_fields)
-    request = CompletionRequest(
-        instructions=instructions,
-        input=material.text,
-        max_output_tokens=max_output_tokens,
-    )
+    composes_narrative = getattr(provider, "composes_narrative", False)
     notes: list[str] = []
     warnings: list[GenerationWarning] = []
-    if material.truncated:
-        # The cited evidence, span and references below stay complete; only the
-        # model's view of the timeline was trimmed to fit the prompt budget.
-        fit = material.fit("timeline")
-        message = (
-            f"The timeline was too large for the prompt budget, so the model was shown "
-            f"only {fit.shown} of {fit.total} timeline events; the incident's cited "
-            "events, span and references remain complete."
+    if not composes_narrative:
+        material = build_incident_material(incident, timeline, excluded_fields=excluded_fields)
+        request = CompletionRequest(
+            instructions=instructions,
+            input=material.text,
+            max_output_tokens=max_output_tokens,
         )
-        notes.append(message)
-        warnings.append(GenerationWarning(code=WarningCode.PROMPT_TRUNCATED, message=message))
+        if material.truncated:
+            # The cited evidence, span and references below stay complete; only the
+            # model's view of the timeline was trimmed to fit the prompt budget.
+            fit = material.fit("timeline")
+            message = (
+                f"The timeline was too large for the prompt budget, so the model was shown "
+                f"only {fit.shown} of {fit.total} timeline events; the incident's cited "
+                "events, span and references remain complete."
+            )
+            notes.append(message)
+            warnings.append(GenerationWarning(code=WarningCode.PROMPT_TRUNCATED, message=message))
     if timeline.missing_event_ids:
         message = (
             f"{len(timeline.missing_event_ids)} cited event(s) no longer resolve "
@@ -381,30 +397,44 @@ def generate_incident_summary(
         notes.append(message)
         warnings.append(GenerationWarning(code=WarningCode.NO_TIMELINE, message=message))
 
-    try:
-        response = provider.complete(request)
-    except AIProviderError:
-        # The provider is only a phrasing layer, so an outage degrades the summary
-        # to the deterministic picture rather than failing the request. The model is
-        # recorded as the provider that was asked, so the gap stays traceable.
-        summary = ""
+    if composes_narrative:
+        # Offline default: no model is asked. The summary is composed from the
+        # incident and its timeline, so it restates the picture and is trustworthy by
+        # construction rather than unverified model prose.
+        summary = compose_incident_narrative(incident, timeline, excluded_fields=excluded_fields)
         model = provider.name
-        message = (
-            "The model was unavailable, so the incident summary reports the "
-            "deterministic picture only."
-        )
-        notes.append(message)
-        warnings.append(GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message=message))
+        summary_status = SummaryStatus.DETERMINISTIC
     else:
-        summary = _constrain_summary(response.text)
-        model = response.model
-        if not summary:
+        try:
+            response = provider.complete(request)
+        except AIProviderError:
+            # The provider is only a phrasing layer, so an outage degrades the summary
+            # to the deterministic picture rather than failing the request. The model is
+            # recorded as the provider that was asked, so the gap stays traceable.
+            summary = ""
+            model = provider.name
+            summary_status = SummaryStatus.UNAVAILABLE
             message = (
-                "The model returned no summary; the incident summary reports the "
+                "The model was unavailable, so the incident summary reports the "
                 "deterministic picture only."
             )
             notes.append(message)
-            warnings.append(GenerationWarning(code=WarningCode.EMPTY_SUMMARY, message=message))
+            warnings.append(GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message=message))
+        else:
+            summary = _constrain_summary(response.text)
+            model = response.model
+            if summary:
+                # Model prose is never checked against the picture, so it is labelled
+                # unverified; the structured facts stay authoritative.
+                summary_status = SummaryStatus.MODEL_UNVERIFIED
+            else:
+                summary_status = SummaryStatus.UNAVAILABLE
+                message = (
+                    "The model returned no summary; the incident summary reports the "
+                    "deterministic picture only."
+                )
+                notes.append(message)
+                warnings.append(GenerationWarning(code=WarningCode.EMPTY_SUMMARY, message=message))
 
     return IncidentSummary(
         incident_id=incident.id,
@@ -413,6 +443,7 @@ def generate_incident_summary(
         severity=incident.severity,
         resolution_note=incident.resolution_note,
         summary=summary,
+        summary_status=summary_status,
         model=model,
         output_version=INCIDENT_SUMMARY_OUTPUT_VERSION,
         prompt_version=INCIDENT_SUMMARY_PROMPT_VERSION,

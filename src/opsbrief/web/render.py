@@ -212,15 +212,31 @@ def _render_brief_notes(notes: tuple[str, ...]) -> str:
     return f'<ul class="notes">{items}</ul>'
 
 
-def _render_brief(view: DashboardView) -> str:
-    """Render the daily-brief panel: the model summary and how far to trust it.
+def _summary_provenance(summary_status: str, model: str) -> str:
+    """Phrase how the summary was produced, so the reader knows how far to trust it.
 
-    Only the summary comes from a model, and it is carried through already bounded
-    and collapsed by the brief pipeline; it is still escaped as it is placed. The
-    panel names the model that phrased it and the derived confidence level, and
-    lists the notes on where the picture is incomplete. When the summary is empty
-    (the provider was unavailable or returned nothing) the panel says so plainly
-    rather than showing a blank line, and the notes explain why.
+    The verification of the prose is separate from the confidence in the evidence: a
+    deterministic summary restates the facts, a model summary is unverified prose the
+    reader weighs against the structured risks and actions, and an unavailable one
+    means only the structured picture stands.
+    """
+    if summary_status == "deterministic":
+        return "Composed from the operational picture; no model, so it restates the facts."
+    if summary_status == "model_unverified":
+        return f"Phrased by {model}; model prose, not verified against the facts."
+    return "No summary was produced; the structured picture below stands on its own."
+
+
+def _render_brief(view: DashboardView) -> str:
+    """Render the daily-brief panel: the summary and how far to trust it.
+
+    The summary is carried through already bounded and collapsed by the brief
+    pipeline; it is still escaped as it is placed. The panel states how the summary
+    was produced (composed from the picture, unverified model prose, or unavailable)
+    separately from the derived confidence level in the evidence, and lists the notes
+    on where the picture is incomplete. When the summary is empty (the provider was
+    unavailable or returned nothing) the panel says so plainly rather than showing a
+    blank line, and the notes explain why.
     """
     brief = view.brief
     if brief is None:
@@ -230,12 +246,13 @@ def _render_brief(view: DashboardView) -> str:
         summary = f'<p class="summary">{escape(brief.summary)}</p>'
     else:
         summary = '<p class="summary empty">No summary was phrased for the current picture.</p>'
+    provenance = _summary_provenance(brief.summary_status, brief.model)
     return (
         '<section class="panel">'
         "<h2>Daily brief</h2>"
         '<div class="brief">'
         f"{summary}"
-        f'<p class="meta">Phrased by {escape(brief.model)}; confidence '
+        f'<p class="meta">{escape(provenance)} Confidence '
         f'<span class="conf {badge_class}">{escape(brief.confidence)}</span></p>'
         f"{_render_brief_notes(brief.notes)}"
         "</div>"

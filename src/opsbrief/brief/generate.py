@@ -17,6 +17,7 @@ import re
 from collections.abc import Callable, Container
 
 from opsbrief.ai import AIProvider, AIProviderError, CompletionRequest
+from opsbrief.brief.narrative import compose_brief_narrative
 from opsbrief.brief.schema import (
     BRIEF_OUTPUT_VERSION,
     BRIEF_PROMPT_VERSION,
@@ -28,6 +29,7 @@ from opsbrief.brief.schema import (
 from opsbrief.exclusion import shown_risk_title, shown_value
 from opsbrief.prompt_budget import BudgetedMaterial, Section, render_budgeted
 from opsbrief.risks import Risk
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import GenerationWarning, WarningCode
 
 #: The task the model performs, phrased by the service. It asks only for prose:
@@ -199,44 +201,64 @@ def generate_brief(
     traces to the exact prompt behind it and a consumer can detect a change in
     either.
     """
-    material = build_brief_material(context, excluded_fields=excluded_fields)
-    request = CompletionRequest(
-        instructions=instructions,
-        input=material.text,
-        max_output_tokens=max_output_tokens,
-    )
     notes = list(context.notes)
     warnings = list(context.warnings)
-    if material.truncated:
-        # The deterministic picture below stays complete; only the model's view was
-        # trimmed to fit the prompt budget, so say which parts it did not see.
-        message = _truncation_message(material)
-        notes.append(message)
-        warnings.append(GenerationWarning(code=WarningCode.PROMPT_TRUNCATED, message=message))
-    try:
-        response = provider.complete(request)
-    except AIProviderError:
-        # The provider is only a phrasing layer, so an outage degrades the brief
-        # to the deterministic picture rather than failing the request. The model
-        # is recorded as the provider that was asked, so the gap stays traceable.
-        summary = ""
+
+    if getattr(provider, "composes_narrative", False):
+        # Offline default: no model is asked. The summary is composed from the
+        # structured picture, so it restates the facts and is trustworthy by
+        # construction rather than unverified model prose. The prompt budget is
+        # irrelevant here, so no truncation warning is raised.
+        summary = compose_brief_narrative(context, excluded_fields=excluded_fields)
         model = provider.name
-        message = "The model was unavailable, so the brief reports the deterministic picture only."
-        notes.append(message)
-        warnings.append(GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message=message))
+        summary_status = SummaryStatus.DETERMINISTIC
     else:
-        summary = _constrain_summary(response.text)
-        model = response.model
-        if not summary:
+        material = build_brief_material(context, excluded_fields=excluded_fields)
+        request = CompletionRequest(
+            instructions=instructions,
+            input=material.text,
+            max_output_tokens=max_output_tokens,
+        )
+        if material.truncated:
+            # The deterministic picture below stays complete; only the model's view
+            # was trimmed to fit the prompt budget, so say which parts it did not see.
+            message = _truncation_message(material)
+            notes.append(message)
+            warnings.append(GenerationWarning(code=WarningCode.PROMPT_TRUNCATED, message=message))
+        try:
+            response = provider.complete(request)
+        except AIProviderError:
+            # The provider is only a phrasing layer, so an outage degrades the brief
+            # to the deterministic picture rather than failing the request. The model
+            # is recorded as the provider that was asked, so the gap stays traceable.
+            summary = ""
+            model = provider.name
+            summary_status = SummaryStatus.UNAVAILABLE
             message = (
-                "The model returned no summary; the brief reports the deterministic picture only."
+                "The model was unavailable, so the brief reports the deterministic picture only."
             )
             notes.append(message)
-            warnings.append(GenerationWarning(code=WarningCode.EMPTY_SUMMARY, message=message))
+            warnings.append(GenerationWarning(code=WarningCode.MODEL_UNAVAILABLE, message=message))
+        else:
+            summary = _constrain_summary(response.text)
+            model = response.model
+            if summary:
+                # Model prose is never checked against the facts, so it is labelled
+                # unverified; the structured risks and actions stay authoritative.
+                summary_status = SummaryStatus.MODEL_UNVERIFIED
+            else:
+                summary_status = SummaryStatus.UNAVAILABLE
+                message = (
+                    "The model returned no summary; the brief reports the "
+                    "deterministic picture only."
+                )
+                notes.append(message)
+                warnings.append(GenerationWarning(code=WarningCode.EMPTY_SUMMARY, message=message))
 
     return DailyBrief(
         generated_at=context.generated_at,
         summary=summary,
+        summary_status=summary_status,
         model=model,
         output_version=BRIEF_OUTPUT_VERSION,
         prompt_version=BRIEF_PROMPT_VERSION,

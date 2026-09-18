@@ -22,6 +22,20 @@ from opsbrief.config import get_settings
 from opsbrief.risks import Risk
 from opsbrief.services import report_daily_brief
 from opsbrief.storage import EventStore
+from opsbrief.verification import SummaryStatus
+
+#: How each summary status reads in the text brief, so the source of the prose is
+#: plain and kept distinct from the confidence in the evidence.
+_SUMMARY_SOURCE = {
+    SummaryStatus.DETERMINISTIC: "composed from the picture (deterministic, not model-written)",
+    SummaryStatus.MODEL_UNVERIFIED: "model prose, not verified against the facts",
+    SummaryStatus.UNAVAILABLE: "unavailable; the structured picture stands on its own",
+}
+
+
+def _summary_source(brief: DailyBrief) -> str:
+    """Return how the brief's summary was produced, phrased for the text output."""
+    return _SUMMARY_SOURCE[brief.summary_status]
 
 
 def _render_risk(risk: Risk) -> list[str]:
@@ -50,15 +64,18 @@ def render_text(brief: DailyBrief) -> str:
     where the picture is incomplete and the source event IDs behind it are all laid
     out plainly, each risk and each action naming the rule and events it traces to.
     The header records the model that phrased the summary, the prompt and output
-    versions the brief was produced with, and the confidence its warnings imply, so
-    a reader can trace it and weigh it. Empty sections say ``none.`` rather than
-    vanishing, so a reader can tell "nothing to report" from a section that was
-    simply left out.
+    versions the brief was produced with, how the summary was produced (composed
+    from the picture, unverified model prose, or unavailable), and the confidence its
+    warnings imply, so a reader can trace it and weigh it. The summary source and the
+    confidence are separate: one weighs the prose, the other the evidence. Empty
+    sections say ``none.`` rather than vanishing, so a reader can tell "nothing to
+    report" from a section that was simply left out.
     """
     lines: list[str] = [
         "Daily operations brief",
         f"Generated at {brief.generated_at.isoformat()} by {brief.model}",
         f"Prompt version {brief.prompt_version}; output version {brief.output_version}",
+        f"Summary source: {_summary_source(brief)}",
         f"Confidence: {brief.confidence.value}",
         "",
         "Summary:",

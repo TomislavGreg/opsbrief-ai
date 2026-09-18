@@ -2,7 +2,13 @@
 
 from datetime import UTC, datetime
 
-from opsbrief.ai import AIProviderError, CompletionRequest, CompletionResponse, FakeAIProvider
+from opsbrief.ai import (
+    AIProviderError,
+    CompletionRequest,
+    CompletionResponse,
+    DeterministicNarrativeProvider,
+    FakeAIProvider,
+)
 from opsbrief.brief import (
     BRIEF_OUTPUT_VERSION,
     BRIEF_PROMPT_VERSION,
@@ -15,6 +21,7 @@ from opsbrief.brief.generate import DEFAULT_INSTRUCTIONS, generate_brief, render
 from opsbrief.events import EventSeverity, EventStatus
 from opsbrief.references import SourceReference
 from opsbrief.risks import Risk, RiskSeverity
+from opsbrief.verification import SummaryStatus
 from opsbrief.warnings import Confidence, WarningCode
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -225,6 +232,56 @@ def test_a_provider_failure_records_the_provider_as_the_model() -> None:
     brief = generate_brief(make_context(), FailingProvider())
 
     assert brief.model == "failing"
+
+
+def test_the_deterministic_provider_composes_the_summary_offline() -> None:
+    # The offline default asks no model: the summary is composed from the structured
+    # picture and labelled deterministic, so it is trustworthy by construction.
+    brief = generate_brief(make_context(), DeterministicNarrativeProvider())
+
+    assert brief.summary_status is SummaryStatus.DETERMINISTIC
+    assert brief.model == "deterministic"
+    assert brief.summary  # a real sentence, not an echo of the prompt
+    assert "Risks (most urgent first)" not in brief.summary  # no prompt scaffolding
+    # A composed summary is not a model outage, so it raises no gap warning.
+    assert WarningCode.MODEL_UNAVAILABLE not in {w.code for w in brief.warnings}
+    assert WarningCode.EMPTY_SUMMARY not in {w.code for w in brief.warnings}
+
+
+def test_model_prose_is_labelled_unverified() -> None:
+    provider = FakeAIProvider(responses=["Everything is resolved; no work is blocked."])
+
+    brief = generate_brief(make_context(), provider)
+
+    # A model saying nothing is blocked cannot conceal the deterministic risk: the
+    # prose is labelled unverified and the structured risks and actions stand.
+    assert brief.summary_status is SummaryStatus.MODEL_UNVERIFIED
+    assert brief.summary == "Everything is resolved; no work is blocked."
+    assert brief.risks == make_context().risks
+    assert brief.next_actions  # the deterministic action for the risk is still present
+
+
+def test_confidence_is_independent_of_the_summary_status() -> None:
+    # Complete evidence keeps confidence high even when the model prose is unverified:
+    # the two judgements are separate.
+    provider = FakeAIProvider(responses=["All clear, nothing to see here."])
+
+    brief = generate_brief(make_context(), provider)
+
+    assert brief.confidence is Confidence.HIGH
+    assert brief.summary_status is SummaryStatus.MODEL_UNVERIFIED
+
+
+def test_an_outage_marks_the_summary_unavailable() -> None:
+    brief = generate_brief(make_context(), FailingProvider())
+
+    assert brief.summary_status is SummaryStatus.UNAVAILABLE
+
+
+def test_an_empty_model_reply_marks_the_summary_unavailable() -> None:
+    brief = generate_brief(make_context(), FakeAIProvider(responses=[""]))
+
+    assert brief.summary_status is SummaryStatus.UNAVAILABLE
 
 
 def test_render_context_lists_risks_events_and_notes() -> None:
