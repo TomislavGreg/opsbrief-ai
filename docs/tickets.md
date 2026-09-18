@@ -33,12 +33,12 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the Ready queue was AI-100 and AI-111; the P2 AI-100 (eligible
-once AI-099 was Done) is taken ahead of the P3 AI-111; AI-101 is Blocked on Docker
-verification; AI-124 is Blocked on a maintainer settings action and AI-056 on a
-workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099,
-AI-102, AI-104 and AI-105 are Done, clearing the P1 correctness and persistence
-bugs. Read the board, not this paragraph, for the current state.
+At the last update the P2 AI-100 was Done, so the Ready queue was AI-111; AI-101 is
+Blocked on Docker verification; AI-124 is Blocked on a maintainer settings action
+and AI-056 on a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097,
+AI-098, AI-099, AI-100, AI-102, AI-104 and AI-105 are Done, clearing the P1
+correctness and persistence bugs. Read the board, not this paragraph, for the
+current state.
 
 A sensible progression:
 
@@ -422,6 +422,20 @@ Acceptance criteria:
   cancellation and shutdown do not use a closed connection.
 - No background queue, detached fire-and-forget write or new async database
   framework is introduced.
+
+Resolution (Done): extracted the webhook's blocking work (HMAC verification, UTF-8
+decoding, JSON parsing, contract validation and the SQLite write) into a single
+synchronous helper, `_process_signed_delivery`, and had the async handler dispatch
+it through Starlette's `run_in_threadpool` after the bounded async body read. The
+call is awaited, so the 202 is returned only after the transaction commits, a
+storage exception still surfaces as an error rather than a premature success, and
+cancellation waits for the worker thread rather than tearing down a mid-flight
+connection; the application-scoped store is closed only at shutdown. No background
+queue, fire-and-forget write or async database framework was added. The existing
+webhook API tests continue to cover atomicity, response counts and idempotency
+unchanged. Added an event-loop regression test that pauses persistence on a timer
+and asserts the loop still resumes an awaiting coroutine and serves `GET /health`
+within a responsiveness threshold, which fails when the processing runs inline.
 
 ### AI-101: Give the container writable persistent SQLite storage
 
