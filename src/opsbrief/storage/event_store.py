@@ -487,6 +487,18 @@ class EventStore:
             )
         return [_from_row(row) for row in rows], total
 
+    def ping(self) -> None:
+        """Run a cheap, schema-aware query to confirm the store can answer.
+
+        Unlike :meth:`count`, this reads at most one row rather than counting the
+        whole table, so a readiness probe stays cheap on a large database. It still
+        touches the events schema through the same connection a real request uses,
+        so a closed connection or a missing table raises rather than passing, which
+        the readiness service turns into a not-ready result.
+        """
+        with self._lock:
+            self._connection.execute("SELECT 1 FROM events LIMIT 1").fetchone()
+
     def close(self) -> None:
         """Close the underlying connection."""
         with self._lock:

@@ -1,5 +1,6 @@
 """Tests for SQLite event persistence."""
 
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -549,3 +550,26 @@ def test_database_path_reads_a_sqlite_url() -> None:
 def test_unsupported_database_urls_are_rejected(database_url: str) -> None:
     with pytest.raises(ValueError):
         database_path(database_url)
+
+
+def test_ping_answers_on_an_open_store(store: EventStore) -> None:
+    # A cheap schema-aware probe returns without error while the store is open.
+    store.ping()
+
+
+def test_ping_reads_at_most_one_row(store: EventStore) -> None:
+    # Ping stays cheap regardless of how many events are stored, so it still
+    # returns once the table holds rows.
+    store.add(make_event())
+    store.add(make_event())
+
+    store.ping()
+
+
+def test_ping_raises_when_the_connection_is_closed(store: EventStore) -> None:
+    # A closed connection can no longer answer, which readiness turns into a
+    # not-ready result rather than a passing probe.
+    store.close()
+
+    with pytest.raises(sqlite3.Error):
+        store.ping()
