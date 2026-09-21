@@ -33,12 +33,13 @@ ticket blocked on one unavailable tool (for example AI-101 while Docker is
 unavailable) is marked Blocked with the reason and owner and does not stall
 unrelated eligible work.
 
-At the last update the P2 AI-100 and AI-111 were Done, so the Ready queue was
-replenished with AI-103 (validate configuration at startup and make readiness
-truthful), the next eligible P2 whose dependencies are all Done; AI-101 is Blocked
-on Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056
-on a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098,
-AI-099, AI-100, AI-102, AI-104, AI-105 and AI-111 are Done, clearing the P1
+At the last update AI-103 was Done, closing the P2 correctness and safety work bar
+the Docker-gated AI-101, so the Ready queue was replenished with AI-106 (reuse one
+reporting context per dashboard request), the next eligible P2 whose dependencies
+are all Done, opening the efficiency and reporting phase; AI-101 is Blocked on
+Docker verification; AI-124 is Blocked on a maintainer settings action and AI-056 on
+a workflow change. AI-092, AI-093, AI-094, AI-095, AI-096, AI-097, AI-098, AI-099,
+AI-100, AI-102, AI-103, AI-104, AI-105 and AI-111 are Done, clearing the P1
 correctness and persistence bugs. Read the board, not this paragraph, for the
 current state.
 
@@ -530,6 +531,25 @@ Acceptance criteria:
   count and without leaking paths, credentials or arbitrary exception strings.
 - The documented logging level affects logs; CLI configuration failures produce a
   concise actionable error and a non-zero exit rather than a traceback.
+
+Resolution (Done): added `opsbrief.startup` with `validate_settings`, which checks
+the AI provider name (against `known_provider_names`), the excluded AI context
+fields, the database URL (through `database_path`, without opening the file) and the
+log level, raising a `ConfigurationError` with an actionable message and making no
+network call, so a valid offline configuration still starts. `create_app` now calls
+it and `configure_logging` before building the application, so an unknown value
+fails at startup rather than at the first request. The lifespan opens both stores
+into one `ExitStack` and publishes the application state only once both are open and
+any demo seeding has succeeded, so a failed second open or seeding closes every
+already-open resource and leaves no partial state. `configure_logging` applies
+`OPSBRIEF_LOG_LEVEL` to the root logger. Readiness now probes each store with a
+cheap single-row schema-aware `ping` rather than a whole-table count, and maps any
+failure to a fixed safe category ("storage schema is unavailable" for a missing
+table, otherwise "storage is unavailable") rather than the raw exception text, so no
+path or driver message leaks. The `opsbrief` CLI validates the settings up front and
+reports any fault as one concise line on standard error with a non-zero exit,
+folding a settings-construction `ValidationError` into the same line. Added startup,
+main-lifecycle, store-ping, CLI and readiness tests.
 
 ### AI-104: Align input validation with stored and generated output contracts
 
