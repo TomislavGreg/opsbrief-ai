@@ -321,3 +321,25 @@ def test_create_schema_adds_a_missing_resolution_note_column() -> None:
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(incidents)")}
     assert "resolution_note" in columns
     connection.close()
+
+
+def test_ping_answers_on_an_open_store(store: IncidentStore) -> None:
+    # A cheap schema-aware probe returns without error while the store is open.
+    store.ping()
+
+
+def test_ping_reads_at_most_one_row(store: IncidentStore) -> None:
+    # Ping stays cheap regardless of how many incidents are stored.
+    store.add(make_incident(incident_id="inc-1"))
+    store.add(make_incident(incident_id="inc-2"))
+
+    store.ping()
+
+
+def test_ping_raises_when_the_connection_is_closed(store: IncidentStore) -> None:
+    # A closed connection can no longer answer, which readiness turns into a
+    # not-ready result rather than a passing probe.
+    store.close()
+
+    with pytest.raises(sqlite3.Error):
+        store.ping()
