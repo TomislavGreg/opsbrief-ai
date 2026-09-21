@@ -230,3 +230,50 @@ def test_configured_excluded_fields_are_held_back_from_the_model(
 def test_an_unknown_format_is_rejected() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--format", "yaml"])
+
+
+def test_an_unknown_provider_is_a_concise_configuration_error(
+    database_url: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A configuration fault is reported as one concise line on stderr with a
+    # non-zero exit, rather than a traceback.
+    monkeypatch.setenv("OPSBRIEF_AI_PROVIDER", "mystery")
+    get_settings.cache_clear()
+
+    exit_code = run([])
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "configuration error" in captured.err
+    assert "mystery" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_an_unknown_excluded_field_is_a_configuration_error(
+    database_url: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("OPSBRIEF_AI_CONTEXT_EXCLUDED_FIELDS", "subject, nope")
+    get_settings.cache_clear()
+
+    exit_code = run([])
+
+    assert exit_code == 2
+    assert "nope" in capsys.readouterr().err
+
+
+def test_an_invalid_webhook_secret_is_a_configuration_error(
+    database_url: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A settings-construction failure (a too-short secret) is folded into the same
+    # concise configuration-error line rather than a Pydantic ValidationError dump.
+    monkeypatch.setenv("OPSBRIEF_WEBHOOK_SECRET", "too-short")
+    get_settings.cache_clear()
+
+    exit_code = run([])
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "configuration error" in captured.err
+    assert "16 characters" in captured.err
+    assert "Traceback" not in captured.err
