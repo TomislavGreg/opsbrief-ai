@@ -102,7 +102,7 @@ should be set deliberately for a real deployment.
 |----------|---------|-------|
 | `OPSBRIEF_APP_NAME` | `OpsBrief AI` | Service name reported by `/health`. |
 | `OPSBRIEF_ENVIRONMENT` | `development` | Free-form environment label reported by `/health`. Set to `production` (or your own label) so a reader can tell instances apart. |
-| `OPSBRIEF_LOG_LEVEL` | `info` | Log level label. |
+| `OPSBRIEF_LOG_LEVEL` | `info` | Root logger level, applied at startup: `critical`, `error`, `warning`, `info` or `debug`. An unknown level is refused at startup. |
 | `OPSBRIEF_DATABASE_URL` | `sqlite:///./opsbrief.db` | The SQLite database. Only `sqlite:///` URLs are accepted. Point this at a path on durable storage (see [Persistence](#persistence)). |
 | `OPSBRIEF_AI_PROVIDER` | `deterministic` | The AI provider. `deterministic` composes summaries from the structured picture offline; `fake` is the scripted test provider. An unknown name is refused at startup. |
 | `OPSBRIEF_READ_ONLY` | `false` | When true, every write route (event and batch ingestion, incident declaration and mutation, and the webhook) is refused with 403 while reads keep working. Demo-data mode turns this on by default. See [Read-only mode](#read-only-mode). |
