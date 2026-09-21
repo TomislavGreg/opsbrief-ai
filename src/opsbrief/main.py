@@ -1,7 +1,7 @@
 """FastAPI application entry point."""
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -11,6 +11,7 @@ from opsbrief.api.limits import MaxBodySizeMiddleware
 from opsbrief.api.readonly import ReadOnlyMiddleware
 from opsbrief.config import get_settings
 from opsbrief.samples.seed import seed_demo_data
+from opsbrief.startup import configure_logging, validate_settings
 from opsbrief.storage import EventStore, IncidentStore
 
 
@@ -23,26 +24,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     same configured database and are closed again when the application stops. When
     demo-data mode is on, an empty store is seeded with synthetic data once the
     stores are open, so a public demo starts with a populated dashboard.
+
+    Both stores are entered into one :class:`~contextlib.ExitStack`, and the
+    application state is published only once both are open and any seeding has
+    succeeded. So if the second open or the seeding fails, the stack closes every
+    resource already opened and no partial state is left on the application.
     """
     settings = get_settings()
-    event_store = EventStore.open(settings.database_url)
-    incident_store = IncidentStore.open(settings.database_url)
-    app.state.event_store = event_store
-    app.state.incident_store = incident_store
-    if settings.demo_data:
-        seed_demo_data(event_store, incident_store)
-    try:
-        yield
-    finally:
-        app.state.event_store = None
-        app.state.incident_store = None
-        incident_store.close()
-        event_store.close()
+    with ExitStack() as stack:
+        event_store = stack.enter_context(EventStore.open(settings.database_url))
+        incident_store = stack.enter_context(IncidentStore.open(settings.database_url))
+        if settings.demo_data:
+            seed_demo_data(event_store, incident_store)
+        app.state.event_store = event_store
+        app.state.incident_store = incident_store
+        try:
+            yield
+        finally:
+            app.state.event_store = None
+            app.state.incident_store = None
 
 
 def create_app() -> FastAPI:
-    """Build and configure the FastAPI application."""
+    """Build and configure the FastAPI application.
+
+    Configuration is validated and logging is wired before the application is
+    built, so an unknown provider, excluded field, database URL or log level fails
+    here with an actionable error rather than surfacing later as a request-time
+    failure or being silently ignored.
+    """
     settings = get_settings()
+    validate_settings(settings)
+    configure_logging(settings)
     app = FastAPI(
         title=settings.app_name,
         version=__version__,
