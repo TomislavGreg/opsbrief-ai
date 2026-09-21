@@ -21,6 +21,16 @@ _PROVIDERS = {
 }
 
 
+def known_provider_names() -> frozenset[str]:
+    """Return the provider names this build can construct.
+
+    Startup validation checks a configured name against this set without
+    constructing the provider, so a misconfiguration is caught before the
+    application serves rather than at the first generation attempt.
+    """
+    return frozenset(_PROVIDERS)
+
+
 def create_provider(settings: Settings | None = None) -> AIProvider:
     """Return the AI provider named by ``settings.ai_provider``.
 
