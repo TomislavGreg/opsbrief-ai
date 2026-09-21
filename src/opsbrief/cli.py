@@ -13,14 +13,18 @@ the result onward.
 """
 
 import argparse
+import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
+
 from opsbrief.ai import create_provider
 from opsbrief.brief import DailyBrief, NextAction
-from opsbrief.config import get_settings
+from opsbrief.config import Settings, get_settings
 from opsbrief.risks import Risk
 from opsbrief.services import report_daily_brief
+from opsbrief.startup import ConfigurationError, configure_logging, validate_settings
 from opsbrief.storage import EventStore
 from opsbrief.verification import SummaryStatus
 
@@ -161,16 +165,42 @@ def generate() -> DailyBrief:
         )
 
 
+def _load_settings() -> Settings:
+    """Return the validated settings, raising ``ConfigurationError`` on any fault.
+
+    Constructing the settings validates the webhook fields, and
+    :func:`~opsbrief.startup.validate_settings` checks the provider, excluded
+    fields, database URL and log level. A Pydantic ``ValidationError`` from
+    construction is folded into a single :class:`~opsbrief.startup.ConfigurationError`
+    line, so the caller has one concise, actionable error to report.
+    """
+    try:
+        settings = get_settings()
+    except ValidationError as error:
+        messages = "; ".join(item["msg"] for item in error.errors())
+        raise ConfigurationError(messages) from error
+    validate_settings(settings)
+    return settings
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     """Generate the brief, print it in the requested format and return an exit code.
 
     Rendering is chosen by ``--format``; the brief itself is the same one the API
-    returns, so the two never disagree. The return value is a process exit code:
-    zero, because producing a brief over whatever events are stored is a success
-    even when there is nothing to report — that case is a brief that says so, not
-    an error.
+    returns, so the two never disagree. A configuration fault (an unknown provider,
+    excluded field, database URL, log level or webhook setting) is reported as one
+    concise line on standard error and returns a non-zero exit code, rather than a
+    traceback. Otherwise the return value is zero, because producing a brief over
+    whatever events are stored is a success even when there is nothing to report:
+    that case is a brief that says so, not an error.
     """
     args = build_parser().parse_args(argv)
+    try:
+        settings = _load_settings()
+    except ConfigurationError as error:
+        print(f"opsbrief: configuration error: {error}", file=sys.stderr)
+        return 2
+    configure_logging(settings)
     brief = generate()
     rendered = render_json(brief) if args.format == "json" else render_text(brief)
     print(rendered)
