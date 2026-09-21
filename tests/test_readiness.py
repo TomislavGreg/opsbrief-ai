@@ -59,3 +59,30 @@ def test_a_probe_failure_is_captured_not_raised(
     assert readiness.ready is False
     assert all(check.ready is False for check in readiness.checks)
     assert all(check.detail for check in readiness.checks)
+
+
+def test_an_unreachable_store_reports_a_safe_category(
+    event_store: EventStore, incident_store: IncidentStore
+) -> None:
+    # The detail is a fixed safe category, never the raw exception text, so a
+    # database path or driver message cannot leak through a public probe.
+    incident_store.close()
+
+    readiness = check_readiness(event_store, incident_store)
+
+    incident_check = next(c for c in readiness.checks if c.name == "incident_store")
+    assert incident_check.detail == "storage is unavailable"
+
+
+def test_a_missing_table_is_reported_as_a_schema_gap(
+    event_store: EventStore, incident_store: IncidentStore
+) -> None:
+    # An uninitialised schema is distinguished from an unreachable store, so an
+    # operator can tell them apart, still without leaking the raw error.
+    event_store._connection.execute("DROP TABLE events")
+
+    readiness = check_readiness(event_store, incident_store)
+
+    assert readiness.ready is False
+    event_check = next(c for c in readiness.checks if c.name == "event_store")
+    assert event_check.detail == "storage schema is unavailable"
